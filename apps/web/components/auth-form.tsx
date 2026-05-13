@@ -24,6 +24,7 @@ export function AuthForm({ mode }: AuthFormProps) {
   const setUser = useAuthStore((state) => state.setUser);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -33,19 +34,27 @@ export function AuthForm({ mode }: AuthFormProps) {
     setError(null);
     setSuccess(null);
 
-    const schema = mode === 'login' ? loginFormSchema : registerFormSchema;
-    const parsed = schema.safeParse({ email, password });
-
-    if (!parsed.success) {
-      setError(getErrorMessage(parsed.error.issues[0]?.message));
-      return;
+    if (mode === 'login') {
+      const parsed = loginFormSchema.safeParse({ email, password, rememberMe });
+      if (!parsed.success) {
+        setError(getErrorMessage(parsed.error.issues[0]?.message));
+        return;
+      }
+    } else {
+      const parsed = registerFormSchema.safeParse({ email, password });
+      if (!parsed.success) {
+        setError(getErrorMessage(parsed.error.issues[0]?.message));
+        return;
+      }
     }
 
     setLoading(true);
 
     try {
       const result =
-        mode === 'login' ? await login(parsed.data) : await register(parsed.data);
+        mode === 'login'
+          ? await login({ email, password, rememberMe })
+          : await register({ email, password });
 
       if (!result.ok) {
         setError(result.message);
@@ -95,6 +104,19 @@ export function AuthForm({ mode }: AuthFormProps) {
           onChange={setPassword}
           disabled={loading}
         />
+
+        {mode === 'login' ? (
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(event) => setRememberMe(event.target.checked)}
+              disabled={loading}
+              className="size-4 rounded border"
+            />
+            <span>Remember me</span>
+          </label>
+        ) : null}
       </div>
 
       {error ? (

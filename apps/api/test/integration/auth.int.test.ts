@@ -290,13 +290,18 @@ class InMemoryPasswordResetMailer {
 }
 
 function getCookieHeader(response: Response): string {
+  const cookie = getSetCookieHeader(response);
+  return cookie.split(';')[0] ?? cookie;
+}
+
+function getSetCookieHeader(response: Response): string {
   const cookie = response.headers.get('set-cookie');
 
   if (!cookie) {
     throw new Error('Expected auth cookie in response header');
   }
 
-  return cookie.split(';')[0] ?? cookie;
+  return cookie;
 }
 
 describe('Auth flows (integration)', () => {
@@ -422,6 +427,47 @@ describe('Auth flows (integration)', () => {
     const payload = (await meAfterLogout.json()) as AuthErrorResponse;
     expect(meAfterLogout.status).toBe(401);
     expect(payload.error.code).toBe('AUTH_UNAUTHORIZED');
+  });
+
+  it('sets cookie ttl based on rememberMe flag', async () => {
+    await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'customer+remember@shoppilot.local',
+        password: 'SecurePass123',
+      }),
+    });
+
+    const regularLogin = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'customer+remember@shoppilot.local',
+        password: 'SecurePass123',
+        rememberMe: false,
+      }),
+    });
+
+    const regularSetCookie = getSetCookieHeader(regularLogin);
+    expect(regularSetCookie).toContain(
+      `Max-Age=${env.AUTH_COOKIE_TTL_MINUTES * 60}`,
+    );
+
+    const rememberedLogin = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'customer+remember@shoppilot.local',
+        password: 'SecurePass123',
+        rememberMe: true,
+      }),
+    });
+
+    const rememberedSetCookie = getSetCookieHeader(rememberedLogin);
+    expect(rememberedSetCookie).toContain(
+      `Max-Age=${env.AUTH_COOKIE_TTL_REMEMBER_MINUTES * 60}`,
+    );
   });
 
   it('processes password reset token lifecycle', async () => {

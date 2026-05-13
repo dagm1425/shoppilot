@@ -18,6 +18,7 @@ describe('Auth pages', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Remember me')).toBeInTheDocument();
   });
 
   it('renders register route shell and actions', () => {

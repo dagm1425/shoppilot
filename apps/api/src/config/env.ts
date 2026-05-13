@@ -13,6 +13,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32).default('replace-this-development-jwt-secret-1234'),
   AUTH_COOKIE_NAME: z.string().min(1).default('shoppilot_auth'),
   AUTH_COOKIE_TTL_MINUTES: z.coerce.number().int().positive().default(120),
+  AUTH_COOKIE_TTL_REMEMBER_MINUTES: z.coerce.number().int().positive().default(43_200),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
   AUTH_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().positive().default(15),
   AUTH_RESET_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),

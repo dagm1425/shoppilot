@@ -22,6 +22,7 @@ export const registerFormSchema = z.object({
 export const loginFormSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, 'Password is required.'),
+  rememberMe: z.boolean().optional().default(false),
 });
 
 export const forgotPasswordSchema = z.object({

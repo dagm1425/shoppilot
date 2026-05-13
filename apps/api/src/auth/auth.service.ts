@@ -101,7 +101,10 @@ export class AuthService {
       sessionVersion: user.sessionVersion,
     });
 
-    this.setAuthCookie(response, token);
+    const cookieTtlMinutes = input.rememberMe
+      ? this.env.AUTH_COOKIE_TTL_REMEMBER_MINUTES
+      : this.env.AUTH_COOKIE_TTL_MINUTES;
+    this.setAuthCookie(response, token, cookieTtlMinutes);
 
     return {
       user: {
@@ -259,9 +262,13 @@ export class AuthService {
     return this.jwtService.signAsync(payload);
   }
 
-  private setAuthCookie(response: Response, token: string): void {
+  private setAuthCookie(
+    response: Response,
+    token: string,
+    ttlMinutes = this.env.AUTH_COOKIE_TTL_MINUTES,
+  ): void {
     response.cookie(this.env.AUTH_COOKIE_NAME, token, {
-      ...buildAuthCookieOptions(this.env),
+      ...buildAuthCookieOptions(this.env, ttlMinutes),
     });
   }
 

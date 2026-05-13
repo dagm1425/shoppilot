@@ -5,6 +5,8 @@ async function waitForClientHydration(page: Page) {
 }
 
 test('login, protected account, and logout flow', async ({ page }) => {
+  let loginRememberMeValue: boolean | undefined;
+
   await page.route('**/auth/**', async (route) => {
     const url = route.request().url();
     const method = route.request().method();
@@ -24,6 +26,9 @@ test('login, protected account, and logout flow', async ({ page }) => {
     }
 
     if (url.endsWith('/auth/login') && method === 'POST') {
+      const payload = route.request().postDataJSON() as { rememberMe?: boolean };
+      loginRememberMeValue = payload.rememberMe;
+
       await route.fulfill({
         status: 200,
         headers: corsHeaders,
@@ -74,6 +79,7 @@ test('login, protected account, and logout flow', async ({ page }) => {
   await page.getByLabel('Email').fill('customer@shoppilot.local');
   await page.locator('input#password').fill('SecurePass123');
   await page.getByRole('button', { name: 'Sign in' }).click();
+  expect(loginRememberMeValue).toBe(false);
 
   await expect(page).toHaveURL(/\/account$/);
   await expect(page.getByText('Signed in as')).toBeVisible();

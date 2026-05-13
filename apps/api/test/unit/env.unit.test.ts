@@ -12,6 +12,7 @@ describe('parseEnv', () => {
 
     expect(parsed.API_PORT).toBe(4000);
     expect(parsed.SENTRY_ENABLED).toBe('false');
+    expect(parsed.AUTH_COOKIE_TTL_REMEMBER_MINUTES).toBe(43_200);
   });
 
   it('throws for missing database url', () => {
