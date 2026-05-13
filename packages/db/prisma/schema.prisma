@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String               @id @default(cuid())
+  email             String               @unique
+  passwordHash      String
+  role              Role                 @default(CUSTOMER)
+  sessionVersion    Int                  @default(0)
+  passwordResetKeys PasswordResetToken[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, expiresAt], map: "password_reset_tokens_user_id_expires_at_idx")
+  @@map("password_reset_tokens")
+}
+
+model SeedMarker {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("seed_markers")
+}
+
+model RefundPlaceholder {
+  id             String   @id @default(cuid())
+  externalRef    String?
+  status         String   @default("reserved")
+  reason         String?
+  reservedFor    String   @default("phase-6")
+  createdAt      DateTime @default(now())
+
+  /// future: refunds lifecycle - schema placeholder reserved for Phase 6 implementation
+  @@map("refund_placeholders")
+}
+
+model AuditEventPlaceholder {
+  id          String   @id @default(cuid())
+  actorId     String?
+  entityType  String
+  entityId    String
+  action      String
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  /// future: admin audit expansion - reserved to avoid breaking schema changes in later phases
+  @@map("audit_event_placeholders")
+}
+
+model EmailEventPlaceholder {
+  id                String   @id @default(cuid())
+  providerMessageId String?
+  recipient         String
+  template          String
+  deliveryStatus    String   @default("reserved")
+  createdAt         DateTime @default(now())
+
+  /// future: email delivery analytics - reserved metadata model for async workflow phases
+  @@map("email_event_placeholders")
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
