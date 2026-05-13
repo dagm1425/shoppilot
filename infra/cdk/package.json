@@ -1,0 +1,24 @@
+{
+  "name": "@shoppilot/cdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsc -w -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm test:unit && pnpm test:int && pnpm test:e2e",
+    "test:unit": "echo 'No unit tests in @shoppilot/cdk for Phase 0'",
+    "test:int": "echo 'No integration tests in @shoppilot/cdk for Phase 0'",
+    "test:e2e": "echo 'No e2e tests in @shoppilot/cdk for Phase 0'",
+    "synth": "cdk synth"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.212.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1025.0"
+  }
+}
