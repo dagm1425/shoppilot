@@ -6,7 +6,7 @@ export default function ForgotPasswordPage() {
   return (
     <AppShell
       title="Password recovery"
-      subtitle="Request a secure password reset token"
+      subtitle="Request a secure password reset email"
     >
       <ForgotPasswordForm />
       <div className="text-sm text-muted-foreground">

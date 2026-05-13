@@ -5,12 +5,14 @@ import {
   HttpCode,
   Inject,
   Post,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { Role } from '@prisma/client';
+import type { RequestWithContext } from '../common/request-context.js';
 import { parseEnv } from '../config/env.js';
 import { CurrentUser } from './current-user.decorator.js';
 import {
@@ -84,9 +86,9 @@ export class AuthController {
       ttl: env.AUTH_RESET_RATE_LIMIT_WINDOW_MINUTES * 60_000,
     },
   })
-  async requestPasswordReset(@Body() body: unknown) {
+  async requestPasswordReset(@Body() body: unknown, @Req() request: RequestWithContext) {
     const input = parseOrThrow(passwordResetRequestSchema, body);
-    return this.authService.requestPasswordReset(input);
+    return this.authService.requestPasswordReset(input, request.requestId);
   }
 
   @Post('password-reset/confirm')

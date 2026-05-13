@@ -18,6 +18,10 @@ const envSchema = z.object({
   AUTH_RESET_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
   AUTH_RESET_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().positive().default(30),
   AUTH_RESET_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(30),
+  EMAIL_FROM_ADDRESS: z.string().email().default('onboarding@resend.dev'),
+  EMAIL_FROM_NAME: z.string().min(1).default('ShopPilot'),
+  EMAIL_RESET_BASE_URL: z.string().url().default('http://localhost:3000/reset-password'),
+  RESEND_API_KEY: z.string().min(1, 'RESEND_API_KEY is required.'),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

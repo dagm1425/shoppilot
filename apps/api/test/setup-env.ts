@@ -15,4 +15,9 @@ process.env.AUTH_RESET_RATE_LIMIT_MAX = process.env.AUTH_RESET_RATE_LIMIT_MAX ??
 process.env.AUTH_RESET_RATE_LIMIT_WINDOW_MINUTES =
   process.env.AUTH_RESET_RATE_LIMIT_WINDOW_MINUTES ?? '30';
 process.env.AUTH_RESET_TOKEN_TTL_MINUTES = process.env.AUTH_RESET_TOKEN_TTL_MINUTES ?? '30';
+process.env.EMAIL_FROM_ADDRESS = process.env.EMAIL_FROM_ADDRESS ?? 'onboarding@resend.dev';
+process.env.EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? 'ShopPilot';
+process.env.EMAIL_RESET_BASE_URL =
+  process.env.EMAIL_RESET_BASE_URL ?? 'http://localhost:3000/reset-password';
+process.env.RESEND_API_KEY = process.env.RESEND_API_KEY ?? 're_test_dummy_api_key';
 process.env.SKIP_DB_CONNECT = process.env.SKIP_DB_CONNECT ?? 'true';

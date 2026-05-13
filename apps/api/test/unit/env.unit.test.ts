@@ -7,6 +7,7 @@ describe('parseEnv', () => {
       API_PORT: '4000',
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shoppilot',
       SENTRY_ENABLED: 'false',
+      RESEND_API_KEY: 're_test_dummy_api_key',
     });
 
     expect(parsed.API_PORT).toBe(4000);
@@ -21,5 +22,27 @@ describe('parseEnv', () => {
         SENTRY_ENABLED: 'false',
       }),
     ).toThrow();
+  });
+
+  it('requires RESEND_API_KEY', () => {
+    expect(() =>
+      parseEnv({
+        NODE_ENV: 'development',
+        API_PORT: '4000',
+        DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shoppilot',
+        SENTRY_ENABLED: 'false',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts config when RESEND_API_KEY is provided', () => {
+    parseEnv({
+      NODE_ENV: 'development',
+      API_PORT: '4000',
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shoppilot',
+      SENTRY_ENABLED: 'false',
+      EMAIL_FROM_ADDRESS: 'onboarding@resend.dev',
+      RESEND_API_KEY: 're_test_dummy_api_key',
+    });
   });
 });

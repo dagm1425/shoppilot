@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { Logger, HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import argon2 from 'argon2';
 import type { Response } from 'express';
@@ -7,6 +7,7 @@ import { Role } from '@prisma/client';
 import { parseEnv } from '../config/env.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { buildAuthCookieOptions, computeResetTokenExpiry } from './auth-cookie.js';
+import { PasswordResetMailerService } from './password-reset-mailer.service.js';
 import type {
   AuthenticatedRequestUser,
   AuthTokenPayload,
@@ -30,6 +31,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     @Inject(JwtService)
     private readonly jwtService: JwtService,
+    @Inject(PasswordResetMailerService)
+    private readonly passwordResetMailer: PasswordResetMailerService,
   ) {}
 
   async register(input: RegisterInput, response: Response) {
@@ -69,6 +72,7 @@ export class AuthService {
 
     this.setAuthCookie(response, token);
 
+    // future: registration email verification - deferred to dedicated auth hardening scope
     return {
       user: {
         id: user.id,
@@ -133,7 +137,7 @@ export class AuthService {
     };
   }
 
-  async requestPasswordReset(input: PasswordResetRequestInput) {
+  async requestPasswordReset(input: PasswordResetRequestInput, requestId?: string) {
     const user = await this.prisma.user.findUnique({ where: { email: input.email } });
 
     if (!user) {
@@ -152,13 +156,22 @@ export class AuthService {
       },
     });
 
-    // future: password reset email delivery - deferred to async/email phase
-    if (this.env.NODE_ENV !== 'production') {
-      this.logger.log(`Generated local password reset token for ${user.email}`);
-      return {
-        message: RESET_RESPONSE_MESSAGE,
+    try {
+      await this.passwordResetMailer.sendResetLink({
+        userId: user.id,
+        email: user.email,
         resetToken: rawToken,
-      };
+        requestId,
+      });
+    } catch (error) {
+      this.logger.error({
+        message: 'Password reset delivery failed',
+        code: 'AUTH_RESET_DELIVERY_FAILED',
+        requestId: requestId ?? 'unknown-request-id',
+        userId: user.id,
+        emailHash: this.hashToken(user.email),
+        error: error instanceof Error ? error.message : 'unknown error',
+      });
     }
 
     return { message: RESET_RESPONSE_MESSAGE };

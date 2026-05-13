@@ -14,13 +14,13 @@ export default async function ResetPasswordPage({ searchParams }: ResetPasswordP
   return (
     <AppShell
       title="Set a new password"
-      subtitle="Use your secure reset token to update your account password"
+      subtitle="Use your secure reset link to update your account password"
     >
       <ResetPasswordForm initialToken={params?.token} />
       <div className="text-sm text-muted-foreground">
-        Need a token first?{' '}
+        Need a reset link first?{' '}
         <Link href="/forgot-password" className="text-primary">
-          Request reset token
+          Request password reset
         </Link>
       </div>
     </AppShell>

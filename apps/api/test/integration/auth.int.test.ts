@@ -34,6 +34,13 @@ type MockResetToken = {
   createdAt: Date;
 };
 
+type MockPasswordResetMail = {
+  userId: string;
+  email: string;
+  resetToken: string;
+  requestId?: string;
+};
+
 class InMemoryPrisma {
   private idCounter = 0;
   private users = new Map<string, MockUser>();
@@ -264,6 +271,24 @@ class InMemoryPrisma {
   }
 }
 
+class InMemoryPasswordResetMailer {
+  throwOnSend = false;
+  sentMessages: MockPasswordResetMail[] = [];
+
+  reset(): void {
+    this.throwOnSend = false;
+    this.sentMessages = [];
+  }
+
+  async sendResetLink(input: MockPasswordResetMail): Promise<void> {
+    this.sentMessages.push(input);
+
+    if (this.throwOnSend) {
+      throw new Error('resend failure');
+    }
+  }
+}
+
 function getCookieHeader(response: Response): string {
   const cookie = response.headers.get('set-cookie');
 
@@ -276,6 +301,7 @@ function getCookieHeader(response: Response): string {
 
 describe('Auth flows (integration)', () => {
   const prismaMock = new InMemoryPrisma();
+  const passwordResetMailerMock = new InMemoryPasswordResetMailer();
 
   let app: INestApplication;
   let baseUrl = '';
@@ -283,6 +309,7 @@ describe('Auth flows (integration)', () => {
   beforeAll(async () => {
     app = await createTestApp({
       prismaService: prismaMock as never,
+      passwordResetMailerService: passwordResetMailerMock as never,
     });
 
     await app.listen(0);
@@ -297,6 +324,7 @@ describe('Auth flows (integration)', () => {
 
   beforeEach(() => {
     prismaMock.reset();
+    passwordResetMailerMock.reset();
   });
 
   afterAll(async () => {
@@ -412,20 +440,19 @@ describe('Auth flows (integration)', () => {
       body: JSON.stringify({ email: 'customer+1@shoppilot.local' }),
     });
 
-    const requestPayload = (await resetRequest.json()) as {
-      message: string;
-      resetToken?: string;
-    };
+    const requestPayload = (await resetRequest.json()) as { message: string };
 
     expect(resetRequest.status).toBe(200);
     expect(requestPayload.message).toContain('If an account exists');
-    expect(requestPayload.resetToken).toBeDefined();
+    expect(passwordResetMailerMock.sentMessages).toHaveLength(1);
+    const issuedToken = passwordResetMailerMock.sentMessages[0]?.resetToken;
+    expect(issuedToken).toBeDefined();
 
     const confirmResponse = await fetch(`${baseUrl}/auth/password-reset/confirm`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        token: requestPayload.resetToken,
+        token: issuedToken,
         password: 'NewPassword123',
       }),
     });
@@ -458,7 +485,7 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        token: requestPayload.resetToken,
+        token: issuedToken,
         password: 'ThirdPassword123',
       }),
     });
@@ -477,14 +504,69 @@ describe('Auth flows (integration)', () => {
       }),
     });
 
-    const payload = (await response.json()) as {
-      message: string;
-      resetToken?: string;
-    };
+    const payload = (await response.json()) as { message: string };
 
     expect(response.status).toBe(200);
     expect(payload.message).toContain('If an account exists');
-    expect(payload.resetToken).toBeUndefined();
+    expect(passwordResetMailerMock.sentMessages).toHaveLength(0);
+  });
+
+  it('sends reset delivery without exposing token in response', async () => {
+    await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'customer+mail@shoppilot.local',
+        password: 'SecurePass123',
+      }),
+    });
+
+    const response = await fetch(`${baseUrl}/auth/password-reset/request`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'customer+mail@shoppilot.local',
+      }),
+    });
+
+    const payload = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.message).toContain('If an account exists');
+    expect(passwordResetMailerMock.sentMessages).toHaveLength(1);
+    expect(passwordResetMailerMock.sentMessages[0]?.email).toBe(
+      'customer+mail@shoppilot.local',
+    );
+    expect(passwordResetMailerMock.sentMessages[0]?.requestId).toBe(
+      response.headers.get('x-request-id') ?? undefined,
+    );
+  });
+
+  it('returns generic response when reset delivery fails', async () => {
+    passwordResetMailerMock.throwOnSend = true;
+
+    await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'customer+mailfail@shoppilot.local',
+        password: 'SecurePass123',
+      }),
+    });
+
+    const response = await fetch(`${baseUrl}/auth/password-reset/request`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'customer+mailfail@shoppilot.local',
+      }),
+    });
+
+    const payload = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.message).toContain('If an account exists');
+    expect(passwordResetMailerMock.sentMessages).toHaveLength(1);
   });
 
   it('rejects expired reset tokens', async () => {
@@ -503,21 +585,19 @@ describe('Auth flows (integration)', () => {
       body: JSON.stringify({ email: 'customer+expired@shoppilot.local' }),
     });
 
-    const requestPayload = (await resetRequest.json()) as {
-      resetToken?: string;
-    };
-
-    if (!requestPayload.resetToken) {
-      throw new Error('Expected local reset token in non-production test mode');
+    expect(passwordResetMailerMock.sentMessages).toHaveLength(1);
+    const issuedToken = passwordResetMailerMock.sentMessages[0]?.resetToken;
+    if (!issuedToken) {
+      throw new Error('Expected issued reset token to exist');
     }
 
-    prismaMock.expireResetToken(requestPayload.resetToken);
+    prismaMock.expireResetToken(issuedToken);
 
     const response = await fetch(`${baseUrl}/auth/password-reset/confirm`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        token: requestPayload.resetToken,
+        token: issuedToken,
         password: 'NewPassword123',
       }),
     });

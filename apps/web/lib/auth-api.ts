@@ -109,7 +109,7 @@ export async function requestPasswordReset(input: ForgotPasswordInput) {
     body: JSON.stringify(input),
   });
 
-  return parseResponse<{ message: string; resetToken?: string }>(response);
+  return parseResponse<{ message: string }>(response);
 }
 
 export async function confirmPasswordReset(input: ResetPasswordInput) {

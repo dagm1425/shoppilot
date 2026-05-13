@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { JwtStrategy } from './jwt.strategy.js';
+import { PasswordResetMailerService } from './password-reset-mailer.service.js';
 import { RolesGuard } from './roles.guard.js';
 
 const env = parseEnv(process.env);
@@ -29,7 +30,13 @@ const env = parseEnv(process.env);
     ]),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard],
+  providers: [
+    AuthService,
+    PasswordResetMailerService,
+    JwtStrategy,
+    JwtAuthGuard,
+    RolesGuard,
+  ],
   exports: [JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}

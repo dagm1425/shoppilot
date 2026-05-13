@@ -55,23 +55,24 @@ export function ResetPasswordForm({ initialToken = '' }: ResetPasswordFormProps)
     <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-6">
       <h2 className="text-lg font-semibold text-card-foreground">Reset password</h2>
       <p className="mt-2 text-sm text-muted-foreground">
-        Provide your reset token and choose a new password.
+        Choose a new password for your account.
       </p>
 
       <div className="mt-4 flex flex-col gap-4">
-        {/* future: password reset email delivery - hide manual token field when provider link flow is fully enabled */}
-        <label htmlFor="token" className="flex flex-col gap-2 text-sm text-foreground">
-          <span className="font-medium">Reset token</span>
-          <input
-            id="token"
-            type="text"
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
-            disabled={loading}
-            placeholder="Paste your reset token"
-            className="rounded-md border bg-card px-3 py-2 text-sm text-card-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
-          />
-        </label>
+        {token.length === 0 ? (
+          <label htmlFor="token" className="flex flex-col gap-2 text-sm text-foreground">
+            <span className="font-medium">Reset token</span>
+            <input
+              id="token"
+              type="text"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              disabled={loading}
+              placeholder="Paste your reset token"
+              className="rounded-md border bg-card px-3 py-2 text-sm text-card-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+            />
+          </label>
+        ) : null}
 
         <PasswordField
           id="password"

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/consistent-type-imports */
 import { Controller, Get, Inject, Query } from '@nestjs/common';
 import { HealthService } from './health.service.js';
 

@@ -1,24 +1,20 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { requestPasswordReset } from '../lib/auth-api';
 import { forgotPasswordSchema, getErrorMessage } from '../lib/auth-form-schemas';
 import { AuthNotice } from './auth-notice';
 
 export function ForgotPasswordForm() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [devToken, setDevToken] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSuccess(null);
-    setDevToken(null);
 
     const parsed = forgotPasswordSchema.safeParse({ email });
     if (!parsed.success) {
@@ -37,16 +33,6 @@ export function ForgotPasswordForm() {
       }
 
       setSuccess(result.data.message);
-      const token = result.data.resetToken ?? null;
-      setDevToken(token);
-
-      const nextPath = token
-        ? `/reset-password?token=${encodeURIComponent(token)}`
-        : '/reset-password';
-      // future: password reset email delivery - rely on provider-sent reset links and remove local token display fallback
-      setTimeout(() => {
-        router.push(nextPath);
-      }, 1000);
     } catch {
       setError('Unable to process reset request right now.');
     } finally {
@@ -58,7 +44,7 @@ export function ForgotPasswordForm() {
     <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-6">
       <h2 className="text-lg font-semibold text-card-foreground">Forgot password</h2>
       <p className="mt-2 text-sm text-muted-foreground">
-        Enter your email to receive a password reset instruction.
+        Enter your email to receive password reset instructions.
       </p>
 
       <label htmlFor="email" className="mt-4 flex flex-col gap-2 text-sm text-foreground">
@@ -82,14 +68,8 @@ export function ForgotPasswordForm() {
       ) : null}
 
       {success ? (
-        <div className="mt-4 flex flex-col gap-2">
+        <div className="mt-4">
           <AuthNotice variant="success" message={success} />
-          {devToken ? (
-            <AuthNotice
-              variant="info"
-              message={`Local dev reset token: ${devToken}`}
-            />
-          ) : null}
         </div>
       ) : null}
 
