@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import * as Sentry from '@sentry/nextjs';
 import { confirmPasswordReset } from '../lib/auth-api';
 import { getErrorMessage, resetPasswordSchema } from '../lib/auth-form-schemas';
-import { AuthNotice } from './auth-notice';
 import { PasswordField } from './password-field';
+import { reportClientError } from '../lib/client-error';
+import { showToast } from '../lib/toast-store';
 
 type ResetPasswordFormProps = {
   initialToken?: string;
@@ -17,17 +17,27 @@ export function ResetPasswordForm({ initialToken = '' }: ResetPasswordFormProps)
   const [token, setToken] = useState(initialToken);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
+    setTokenError(null);
+    setPasswordError(null);
     setSuccess(null);
 
     const parsed = resetPasswordSchema.safeParse({ token, password });
     if (!parsed.success) {
-      setError(getErrorMessage(parsed.error.issues[0]?.message));
+      const issue = parsed.error.issues[0];
+      const message = getErrorMessage(issue?.message);
+      if (issue?.path[0] === 'token') {
+        setTokenError(message);
+      } else if (issue?.path[0] === 'password') {
+        setPasswordError(message);
+      } else {
+        showToast({ variant: 'error', message });
+      }
       return;
     }
 
@@ -37,7 +47,10 @@ export function ResetPasswordForm({ initialToken = '' }: ResetPasswordFormProps)
       const result = await confirmPasswordReset(parsed.data);
 
       if (!result.ok) {
-        setError(result.message);
+        showToast({
+          variant: 'error',
+          message: result.message,
+        });
         return;
       }
 
@@ -46,8 +59,11 @@ export function ResetPasswordForm({ initialToken = '' }: ResetPasswordFormProps)
         router.push('/login');
       }, 800);
     } catch (error) {
-      Sentry.captureException(error);
-      setError('Unable to reset password at this time.');
+      reportClientError({ error, context: 'reset-password:submit' });
+      showToast({
+        variant: 'error',
+        message: 'Unable to reset password at this time.',
+      });
     } finally {
       setLoading(false);
     }
@@ -72,7 +88,9 @@ export function ResetPasswordForm({ initialToken = '' }: ResetPasswordFormProps)
               disabled={loading}
               placeholder="Paste your reset token"
               className="rounded-md border bg-card px-3 py-2 text-sm text-card-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+              aria-invalid={tokenError ? 'true' : 'false'}
             />
+            {tokenError ? <p className="text-sm text-danger">{tokenError}</p> : null}
           </label>
         ) : null}
 
@@ -81,20 +99,15 @@ export function ResetPasswordForm({ initialToken = '' }: ResetPasswordFormProps)
           label="New password"
           value={password}
           onChange={setPassword}
+          error={passwordError ?? undefined}
           disabled={loading}
         />
       </div>
 
-      {error ? (
-        <div className="mt-4">
-          <AuthNotice variant="error" message={error} />
-        </div>
-      ) : null}
-
       {success ? (
-        <div className="mt-4">
-          <AuthNotice variant="success" message={success} />
-        </div>
+        <p className="mt-4 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-foreground">
+          {success}
+        </p>
       ) : null}
 
       <button

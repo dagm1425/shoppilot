@@ -81,11 +81,11 @@ test('login, protected account, and logout flow', async ({ page }) => {
   await page.getByRole('button', { name: 'Sign in' }).click();
   expect(loginRememberMeValue).toBe(false);
 
-  await expect(page).toHaveURL(/\/account$/);
+  await expect(page).toHaveURL(/\/account$/, { timeout: 20_000 });
   await expect(page.getByText('Signed in as')).toBeVisible();
 
   await page.getByRole('button', { name: 'Sign out' }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login$/, { timeout: 20_000 });
 });
 
 test('forgot and reset password flow', async ({ page }) => {

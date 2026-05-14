@@ -3,8 +3,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import * as Sentry from '@sentry/nextjs';
-import { AuthNotice } from './auth-notice';
 import { PasswordField } from './password-field';
 import { login, register } from '../lib/auth-api';
 import {
@@ -13,6 +11,8 @@ import {
   registerFormSchema,
 } from '../lib/auth-form-schemas';
 import { useAuthStore } from '../lib/auth-store';
+import { reportClientError } from '../lib/client-error';
+import { showToast } from '../lib/toast-store';
 
 type AuthMode = 'login' | 'register';
 
@@ -27,24 +27,40 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-    setSuccess(null);
+    setEmailError(null);
+    setPasswordError(null);
 
     if (mode === 'login') {
       const parsed = loginFormSchema.safeParse({ email, password, rememberMe });
       if (!parsed.success) {
-        setError(getErrorMessage(parsed.error.issues[0]?.message));
+        const issue = parsed.error.issues[0];
+        const message = getErrorMessage(issue?.message);
+        if (issue?.path[0] === 'email') {
+          setEmailError(message);
+        } else if (issue?.path[0] === 'password') {
+          setPasswordError(message);
+        } else {
+          showToast({ variant: 'error', message });
+        }
         return;
       }
     } else {
       const parsed = registerFormSchema.safeParse({ email, password });
       if (!parsed.success) {
-        setError(getErrorMessage(parsed.error.issues[0]?.message));
+        const issue = parsed.error.issues[0];
+        const message = getErrorMessage(issue?.message);
+        if (issue?.path[0] === 'email') {
+          setEmailError(message);
+        } else if (issue?.path[0] === 'password') {
+          setPasswordError(message);
+        } else {
+          showToast({ variant: 'error', message });
+        }
         return;
       }
     }
@@ -58,16 +74,21 @@ export function AuthForm({ mode }: AuthFormProps) {
           : await register({ email, password });
 
       if (!result.ok) {
-        setError(result.message);
+        showToast({
+          variant: 'error',
+          message: result.message,
+        });
         return;
       }
 
       setUser(result.data.user);
-      setSuccess(mode === 'login' ? 'Login successful.' : 'Registration successful.');
       router.push('/account');
     } catch (error) {
-      Sentry.captureException(error);
-      setError('Unable to complete this action. Please try again.');
+      reportClientError({ error, context: `${mode}:submit` });
+      showToast({
+        variant: 'error',
+        message: 'Unable to complete this action. Please try again.',
+      });
     } finally {
       setLoading(false);
     }
@@ -96,7 +117,9 @@ export function AuthForm({ mode }: AuthFormProps) {
             autoComplete="email"
             placeholder="you@example.com"
             className="rounded-md border bg-card px-3 py-2 text-sm text-card-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+            aria-invalid={emailError ? 'true' : 'false'}
           />
+          {emailError ? <p className="text-sm text-danger">{emailError}</p> : null}
         </label>
 
         <PasswordField
@@ -104,6 +127,7 @@ export function AuthForm({ mode }: AuthFormProps) {
           label="Password"
           value={password}
           onChange={setPassword}
+          error={passwordError ?? undefined}
           disabled={loading}
         />
 
@@ -120,18 +144,6 @@ export function AuthForm({ mode }: AuthFormProps) {
           </label>
         ) : null}
       </div>
-
-      {error ? (
-        <div className="mt-4">
-          <AuthNotice variant="error" message={error} />
-        </div>
-      ) : null}
-
-      {success ? (
-        <div className="mt-4">
-          <AuthNotice variant="success" message={success} />
-        </div>
-      ) : null}
 
       <button
         type="submit"

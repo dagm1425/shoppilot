@@ -1,25 +1,31 @@
 'use client';
 
 import { useState } from 'react';
-import * as Sentry from '@sentry/nextjs';
 import { requestPasswordReset } from '../lib/auth-api';
 import { forgotPasswordSchema, getErrorMessage } from '../lib/auth-form-schemas';
-import { AuthNotice } from './auth-notice';
+import { reportClientError } from '../lib/client-error';
+import { showToast } from '../lib/toast-store';
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
+    setEmailError(null);
     setSuccess(null);
 
     const parsed = forgotPasswordSchema.safeParse({ email });
     if (!parsed.success) {
-      setError(getErrorMessage(parsed.error.issues[0]?.message));
+      const issue = parsed.error.issues[0];
+      const message = getErrorMessage(issue?.message);
+      if (issue?.path[0] === 'email') {
+        setEmailError(message);
+      } else {
+        showToast({ variant: 'error', message });
+      }
       return;
     }
 
@@ -29,14 +35,20 @@ export function ForgotPasswordForm() {
       const result = await requestPasswordReset(parsed.data);
 
       if (!result.ok) {
-        setError(result.message);
+        showToast({
+          variant: 'error',
+          message: result.message,
+        });
         return;
       }
 
       setSuccess(result.data.message);
     } catch (error) {
-      Sentry.captureException(error);
-      setError('Unable to process reset request right now.');
+      reportClientError({ error, context: 'forgot-password:submit' });
+      showToast({
+        variant: 'error',
+        message: 'Unable to process reset request right now.',
+      });
     } finally {
       setLoading(false);
     }
@@ -60,19 +72,15 @@ export function ForgotPasswordForm() {
           autoComplete="email"
           placeholder="you@example.com"
           className="rounded-md border bg-card px-3 py-2 text-sm text-card-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+          aria-invalid={emailError ? 'true' : 'false'}
         />
+        {emailError ? <p className="text-sm text-danger">{emailError}</p> : null}
       </label>
 
-      {error ? (
-        <div className="mt-4">
-          <AuthNotice variant="error" message={error} />
-        </div>
-      ) : null}
-
       {success ? (
-        <div className="mt-4">
-          <AuthNotice variant="success" message={success} />
-        </div>
+        <p className="mt-4 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-foreground">
+          {success}
+        </p>
       ) : null}
 
       <button

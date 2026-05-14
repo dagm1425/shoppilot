@@ -3,9 +3,9 @@
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import * as Sentry from '@sentry/nextjs';
 import { fetchMe } from '../lib/auth-api';
 import { useAuthStore } from '../lib/auth-store';
+import { reportClientError } from '../lib/client-error';
 import { StatePanel } from './state-panel';
 
 type AuthGuardProps = {
@@ -46,7 +46,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
           return;
         }
 
-        Sentry.captureException(error);
+        reportClientError({ error, context: 'auth-guard:fetch-me' });
         setErrorMessage('Unable to verify session right now.');
         setStatus('error');
       }

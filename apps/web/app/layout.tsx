@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { GlobalToaster } from '../components/global-toaster';
 
 export const metadata: Metadata = {
   title: 'ShopPilot Foundation',
@@ -9,7 +10,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <GlobalToaster />
+      </body>
     </html>
   );
 }

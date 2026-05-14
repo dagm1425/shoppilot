@@ -2,34 +2,38 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import * as Sentry from '@sentry/nextjs';
 import { logout } from '../lib/auth-api';
 import { useAuthStore } from '../lib/auth-store';
-import { AuthNotice } from './auth-notice';
+import { reportClientError } from '../lib/client-error';
+import { showToast } from '../lib/toast-store';
 
 export function AccountPanel() {
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
   const clearUser = useAuthStore((state) => state.clearUser);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function handleLogout() {
     setLoading(true);
-    setError(null);
 
     try {
       const result = await logout();
       if (!result.ok) {
-        setError(result.message);
+        showToast({
+          variant: 'error',
+          message: result.message,
+        });
         return;
       }
 
       clearUser();
       router.push('/login');
     } catch (error) {
-      Sentry.captureException(error);
-      setError('Unable to log out.');
+      reportClientError({ error, context: 'account:logout' });
+      showToast({
+        variant: 'error',
+        message: 'Unable to log out.',
+      });
     } finally {
       setLoading(false);
     }
@@ -44,12 +48,6 @@ export function AccountPanel() {
       <p className="mt-1 text-sm text-muted-foreground">
         Role: <span className="font-medium text-card-foreground">{user?.role ?? 'CUSTOMER'}</span>
       </p>
-
-      {error ? (
-        <div className="mt-4">
-          <AuthNotice variant="error" message={error} />
-        </div>
-      ) : null}
 
       <button
         type="button"
