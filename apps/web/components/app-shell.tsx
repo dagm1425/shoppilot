@@ -11,7 +11,7 @@ type AppShellProps = {
 export function AppShell({ title, subtitle, children, variant = 'default' }: AppShellProps) {
   if (variant === 'auth') {
     return (
-      <main className={cn('min-h-screen bg-auth-radial px-4 py-10 sm:px-6 lg:px-8')}>
+      <main id="main-content" className={cn('min-h-screen bg-auth-radial px-4 py-10 sm:px-6 lg:px-8')}>
         <div className="mx-auto w-full max-w-auth">
           <header className="mb-6 text-center font-auth-body">
             <p className="text-xs uppercase tracking-[0.22em] text-auth-muted">ShopPilot Account</p>
@@ -27,7 +27,7 @@ export function AppShell({ title, subtitle, children, variant = 'default' }: App
   }
 
   return (
-    <main className={cn('min-h-screen bg-background px-4 py-8 sm:px-6 lg:px-10')}>
+    <main id="main-content" className={cn('min-h-screen bg-background px-4 py-8 sm:px-6 lg:px-10')}>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <header className="rounded-lg border bg-card p-6">
           <h1 className="text-2xl font-semibold tracking-tight text-card-foreground">{title}</h1>

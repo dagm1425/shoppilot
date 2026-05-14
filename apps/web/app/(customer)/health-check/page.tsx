@@ -1,5 +1,5 @@
-import { AppShell } from '../../components/app-shell';
-import { StatusCard } from '../../components/status-card';
+import { AppShell } from '../../../components/app-shell';
+import { StatusCard } from '../../../components/status-card';
 
 type HealthResponse = {
   status: string;

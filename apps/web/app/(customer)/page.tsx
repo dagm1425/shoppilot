@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { AppShell } from '../components/app-shell';
-import { EnvNotice } from '../components/env-notice';
+import { AppShell } from '../../components/app-shell';
+import { EnvNotice } from '../../components/env-notice';
 
 export default function HomePage() {
   return (
