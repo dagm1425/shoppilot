@@ -1,23 +1,26 @@
 'use client';
 
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { fetchMe } from '../lib/auth-api';
+import type { AuthUser } from '../lib/auth-store';
 import { useAuthStore } from '../lib/auth-store';
 import { reportClientError } from '../lib/client-error';
 import { StatePanel } from './state-panel';
 
 type AuthGuardProps = {
   children: ReactNode;
+  allowedRoles?: AuthUser['role'][];
 };
 
-export function AuthGuard({ children }: AuthGuardProps) {
+export function AuthGuard({ children, allowedRoles }: AuthGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
   const setUser = useAuthStore((state) => state.setUser);
   const clearUser = useAuthStore((state) => state.clearUser);
-  const [status, setStatus] = useState<'loading' | 'error' | 'ready'>('loading');
+  const [status, setStatus] = useState<'loading' | 'error' | 'forbidden' | 'ready'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
@@ -39,7 +42,14 @@ export function AuthGuard({ children }: AuthGuardProps) {
           return;
         }
 
-        setUser(result.data.user);
+        const authenticatedUser = result.data.user;
+        setUser(authenticatedUser);
+
+        if (allowedRoles && !allowedRoles.includes(authenticatedUser.role)) {
+          setStatus('forbidden');
+          return;
+        }
+
         setStatus('ready');
       } catch (error) {
         if (!active) {
@@ -57,7 +67,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     return () => {
       active = false;
     };
-  }, [clearUser, pathname, router, setUser]);
+  }, [allowedRoles, clearUser, pathname, router, setUser]);
 
   if (status === 'loading') {
     return (
@@ -76,6 +86,23 @@ export function AuthGuard({ children }: AuthGuardProps) {
         title="Session check failed"
         description={errorMessage}
       />
+    );
+  }
+
+  if (status === 'forbidden') {
+    return (
+      <StatePanel
+        variant="error"
+        title="Admin access required"
+        description="Your account does not have permission to open this page."
+      >
+        <Link
+          href="/account"
+          className="inline-flex items-center rounded-md border bg-card px-3 py-2 text-sm font-medium text-card-foreground"
+        >
+          Return to account
+        </Link>
+      </StatePanel>
     );
   }
 

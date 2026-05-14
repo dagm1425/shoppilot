@@ -35,6 +35,7 @@ export class RolesGuard implements CanActivate {
     }
 
     if (!requiredRoles.includes(user.role)) {
+      // future: tenant-scoped RBAC - single-tenant role claim in phase 1
       throw new ForbiddenException({
         code: 'AUTH_FORBIDDEN',
         message: 'You do not have permission to access this resource.',

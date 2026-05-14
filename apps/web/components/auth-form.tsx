@@ -18,6 +18,7 @@ type AuthMode = 'login' | 'register';
 
 type AuthFormProps = {
   mode: AuthMode;
+  postLoginRedirect?: string | null;
 };
 
 type AuthTextFieldProps = {
@@ -30,6 +31,14 @@ type AuthTextFieldProps = {
   error: string | null;
   onChange: (value: string) => void;
 };
+
+function resolvePostAuthRedirect(rawRedirect: string | null): string {
+  if (!rawRedirect || !rawRedirect.startsWith('/') || rawRedirect.startsWith('//')) {
+    return '/account';
+  }
+
+  return rawRedirect;
+}
 
 function AuthTextField({
   id,
@@ -64,7 +73,7 @@ function AuthTextField({
   );
 }
 
-export function AuthForm({ mode }: AuthFormProps) {
+export function AuthForm({ mode, postLoginRedirect = null }: AuthFormProps) {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
   const [username, setUsername] = useState('');
@@ -131,7 +140,11 @@ export function AuthForm({ mode }: AuthFormProps) {
       }
 
       setUser(result.data.user);
-      router.push('/account');
+      const nextRoute =
+        mode === 'login'
+          ? resolvePostAuthRedirect(postLoginRedirect)
+          : '/account';
+      router.push(nextRoute);
     } catch (error) {
       reportClientError({ error, context: `${mode}:submit` });
       showToast({

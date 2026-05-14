@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { logout } from '../lib/auth-api';
@@ -52,6 +53,17 @@ export function AccountPanel() {
       <p className="mt-1 text-sm text-muted-foreground">
         Role: <span className="font-medium text-card-foreground">{user?.role ?? 'CUSTOMER'}</span>
       </p>
+
+      {user?.role === 'ADMIN' ? (
+        <div className="mt-4">
+          <Link
+            href="/admin"
+            className="inline-flex items-center rounded-md border bg-card px-3 py-2 text-sm font-medium text-card-foreground"
+          >
+            Open admin workspace
+          </Link>
+        </div>
+      ) : null}
 
       <button
         type="button"

@@ -176,6 +176,7 @@ class InMemoryPrisma {
       where: { id: string };
       data: {
         passwordHash?: string;
+        role?: Role;
         sessionVersion?: { increment: number };
       };
     }) => {
@@ -186,6 +187,10 @@ class InMemoryPrisma {
 
       if (typeof args.data.passwordHash === 'string') {
         user.passwordHash = args.data.passwordHash;
+      }
+
+      if (args.data.role) {
+        user.role = args.data.role;
       }
 
       if (args.data.sessionVersion?.increment) {
@@ -715,6 +720,12 @@ describe('Auth flows (integration)', () => {
   });
 
   it('enforces role guard boundary for admin probe', async () => {
+    const unauthenticatedProbe = await fetch(`${baseUrl}/auth/admin-probe`);
+    const unauthenticatedPayload = (await unauthenticatedProbe.json()) as AuthErrorResponse;
+
+    expect(unauthenticatedProbe.status).toBe(401);
+    expect(unauthenticatedPayload.error.code).toBe('AUTH_UNAUTHORIZED');
+
     await fetch(`${baseUrl}/auth/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -770,6 +781,25 @@ describe('Auth flows (integration)', () => {
     });
 
     expect(adminProbe.status).toBe(200);
+
+    const adminUser = prismaMock.getUserByEmail('admin+1@shoppilot.local');
+    if (!adminUser) {
+      throw new Error('Expected seeded admin user to exist');
+    }
+
+    await prismaMock.user.update({
+      where: { id: adminUser.id },
+      data: {
+        role: Role.CUSTOMER,
+      },
+    });
+
+    const demotedProbe = await fetch(`${baseUrl}/auth/admin-probe`, {
+      headers: { cookie: adminCookie },
+    });
+    const demotedPayload = (await demotedProbe.json()) as AuthErrorResponse;
+    expect(demotedProbe.status).toBe(403);
+    expect(demotedPayload.error.code).toBe('AUTH_FORBIDDEN');
   });
 
   it(

@@ -26,6 +26,7 @@ async function main() {
     },
     create: {
       email: 'admin@shoppilot.local',
+      username: 'admin',
       role: Role.ADMIN,
       passwordHash: adminHash,
     },

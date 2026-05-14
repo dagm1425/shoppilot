@@ -8,8 +8,11 @@ jest.mock('next/navigation', () => ({
 }));
 
 describe('Auth pages', () => {
-  it('renders login route shell and actions', () => {
-    render(React.createElement(LoginPage));
+  it('renders login route shell and actions', async () => {
+    const page = await LoginPage({
+      searchParams: Promise.resolve({}),
+    });
+    render(page);
 
     expect(
       screen.getByRole('heading', {
