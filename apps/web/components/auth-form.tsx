@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import * as Sentry from '@sentry/nextjs';
 import { AuthNotice } from './auth-notice';
 import { PasswordField } from './password-field';
 import { login, register } from '../lib/auth-api';
@@ -64,7 +65,8 @@ export function AuthForm({ mode }: AuthFormProps) {
       setUser(result.data.user);
       setSuccess(mode === 'login' ? 'Login successful.' : 'Registration successful.');
       router.push('/account');
-    } catch {
+    } catch (error) {
+      Sentry.captureException(error);
       setError('Unable to complete this action. Please try again.');
     } finally {
       setLoading(false);

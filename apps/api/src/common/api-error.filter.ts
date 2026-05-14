@@ -4,6 +4,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { SentryExceptionCaptured } from '@sentry/nestjs';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { Response } from 'express';
 import { REQUEST_ID_HEADER, type RequestWithContext } from './request-context.js';
@@ -20,6 +21,7 @@ type ErrorPayload = {
 export class ApiErrorFilter implements ExceptionFilter {
   private readonly logger = new Logger(ApiErrorFilter.name);
 
+  @SentryExceptionCaptured()
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
     const request = context.getRequest<RequestWithContext>();

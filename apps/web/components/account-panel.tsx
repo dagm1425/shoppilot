@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import * as Sentry from '@sentry/nextjs';
 import { logout } from '../lib/auth-api';
 import { useAuthStore } from '../lib/auth-store';
 import { AuthNotice } from './auth-notice';
@@ -26,7 +27,8 @@ export function AccountPanel() {
 
       clearUser();
       router.push('/login');
-    } catch {
+    } catch (error) {
+      Sentry.captureException(error);
       setError('Unable to log out.');
     } finally {
       setLoading(false);

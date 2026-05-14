@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import * as Sentry from '@sentry/nextjs';
 import { confirmPasswordReset } from '../lib/auth-api';
 import { getErrorMessage, resetPasswordSchema } from '../lib/auth-form-schemas';
 import { AuthNotice } from './auth-notice';
@@ -44,7 +45,8 @@ export function ResetPasswordForm({ initialToken = '' }: ResetPasswordFormProps)
       setTimeout(() => {
         router.push('/login');
       }, 800);
-    } catch {
+    } catch (error) {
+      Sentry.captureException(error);
       setError('Unable to reset password at this time.');
     } finally {
       setLoading(false);

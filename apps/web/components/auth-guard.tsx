@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import * as Sentry from '@sentry/nextjs';
 import { fetchMe } from '../lib/auth-api';
 import { useAuthStore } from '../lib/auth-store';
 import { StatePanel } from './state-panel';
@@ -40,11 +41,12 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
         setUser(result.data.user);
         setStatus('ready');
-      } catch {
+      } catch (error) {
         if (!active) {
           return;
         }
 
+        Sentry.captureException(error);
         setErrorMessage('Unable to verify session right now.');
         setStatus('error');
       }

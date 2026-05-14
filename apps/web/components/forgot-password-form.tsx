@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import * as Sentry from '@sentry/nextjs';
 import { requestPasswordReset } from '../lib/auth-api';
 import { forgotPasswordSchema, getErrorMessage } from '../lib/auth-form-schemas';
 import { AuthNotice } from './auth-notice';
@@ -33,7 +34,8 @@ export function ForgotPasswordForm() {
       }
 
       setSuccess(result.data.message);
-    } catch {
+    } catch (error) {
+      Sentry.captureException(error);
       setError('Unable to process reset request right now.');
     } finally {
       setLoading(false);

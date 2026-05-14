@@ -23,6 +23,7 @@
     "@nestjs/platform-express": "^11.1.6",
     "@nestjs/throttler": "^6.5.0",
     "@prisma/client": "^6.19.3",
+    "@sentry/nestjs": "^10.53.1",
     "argon2": "^0.44.0",
     "cookie-parser": "^1.4.7",
     "passport": "^0.7.0",

@@ -17,6 +17,9 @@ export default defineConfig({
       NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:4000',
       NEXT_PUBLIC_SENTRY_ENABLED: process.env.NEXT_PUBLIC_SENTRY_ENABLED ?? 'false',
       NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN ?? '',
+      NEXT_PUBLIC_SENTRY_SAMPLE_RATE: process.env.NEXT_PUBLIC_SENTRY_SAMPLE_RATE ?? '1',
+      NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:
+        process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE ?? '0.05',
     },
   },
 });

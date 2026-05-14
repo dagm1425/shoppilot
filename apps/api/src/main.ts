@@ -6,9 +6,11 @@ import { AppModule } from './app.module.js';
 import { ApiErrorFilter } from './common/api-error.filter.js';
 import { parseEnv } from './config/env.js';
 import { requestContextMiddleware } from './common/request-context.js';
+import { initializeSentry } from './observability/sentry.js';
 
 async function bootstrap() {
   const env = parseEnv(process.env);
+  initializeSentry(env);
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   const logger = new Logger('Bootstrap');
 

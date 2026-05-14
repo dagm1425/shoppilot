@@ -25,6 +25,35 @@ describe('parseEnv', () => {
     ).toThrow();
   });
 
+  it('requires SENTRY_DSN when SENTRY_ENABLED=true', () => {
+    expect(() =>
+      parseEnv({
+        NODE_ENV: 'development',
+        API_PORT: '4000',
+        DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shoppilot',
+        SENTRY_ENABLED: 'true',
+        RESEND_API_KEY: 're_test_dummy_api_key',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts Sentry enabled config with DSN and sample rates', () => {
+    const parsed = parseEnv({
+      NODE_ENV: 'development',
+      API_PORT: '4000',
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shoppilot',
+      SENTRY_ENABLED: 'true',
+      SENTRY_DSN: 'https://public@example.ingest.sentry.io/1',
+      SENTRY_SAMPLE_RATE: '1',
+      SENTRY_TRACES_SAMPLE_RATE: '0.05',
+      RESEND_API_KEY: 're_test_dummy_api_key',
+    });
+
+    expect(parsed.SENTRY_ENABLED).toBe('true');
+    expect(parsed.SENTRY_SAMPLE_RATE).toBe(1);
+    expect(parsed.SENTRY_TRACES_SAMPLE_RATE).toBe(0.05);
+  });
+
   it('requires RESEND_API_KEY', () => {
     expect(() =>
       parseEnv({
