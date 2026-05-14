@@ -20,6 +20,50 @@ type AuthFormProps = {
   mode: AuthMode;
 };
 
+type AuthTextFieldProps = {
+  id: string;
+  label: string;
+  type: 'text' | 'email';
+  autoComplete: string;
+  value: string;
+  disabled: boolean;
+  error: string | null;
+  onChange: (value: string) => void;
+};
+
+function AuthTextField({
+  id,
+  label,
+  type,
+  autoComplete,
+  value,
+  disabled,
+  error,
+  onChange,
+}: AuthTextFieldProps) {
+  return (
+    <div className="space-y-1.5">
+      <div className="relative">
+        <input
+          id={id}
+          type={type}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+          autoComplete={autoComplete}
+          placeholder={label}
+          className="auth-input h-auth-input w-full rounded-auth border-auth border-auth-line bg-auth-panel px-4 pb-2 pt-6 font-auth-body text-base text-auth-ink outline-none transition-colors duration-150 placeholder:text-transparent focus:border-auth-focus disabled:cursor-not-allowed disabled:opacity-70"
+          aria-invalid={error ? 'true' : 'false'}
+        />
+        <label htmlFor={id} className="auth-floating-label">
+          {label}
+        </label>
+      </div>
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+    </div>
+  );
+}
+
 export function AuthForm({ mode }: AuthFormProps) {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
@@ -100,50 +144,41 @@ export function AuthForm({ mode }: AuthFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-6">
-      <h2 className="text-lg font-semibold text-card-foreground">
-        {mode === 'login' ? 'Sign in' : 'Create account'}
-      </h2>
-      <p className="mt-2 text-sm text-muted-foreground">
+    <form
+      onSubmit={handleSubmit}
+      className="rounded-auth border-auth border-auth-line bg-auth-panel px-7 py-8 shadow-auth"
+    >
+      <h2 className="sr-only">{mode === 'login' ? 'Sign in form' : 'Create account form'}</h2>
+      <p className="text-center font-auth-body text-sm text-auth-muted">
         {mode === 'login'
-          ? 'Use your credentials to continue to your account.'
-          : 'Create a customer account for checkout and order tracking.'}
+          ? 'Welcome back. Sign in to continue.'
+          : 'One account across checkout and order tracking.'}
       </p>
 
-      <div className="mt-4 flex flex-col gap-4">
+      <div className="mt-6 flex flex-col gap-3">
         {mode === 'register' ? (
-          <label htmlFor="username" className="flex flex-col gap-2 text-sm text-foreground">
-            <span className="font-medium">Username</span>
-            <input
-              id="username"
-              type="text"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              disabled={loading}
-              autoComplete="username"
-              placeholder="your_handle"
-              className="rounded-md border bg-card px-3 py-2 text-sm text-card-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
-              aria-invalid={usernameError ? 'true' : 'false'}
-            />
-            {usernameError ? <p className="text-sm text-danger">{usernameError}</p> : null}
-          </label>
+          <AuthTextField
+            id="username"
+            type="text"
+            label="Username"
+            value={username}
+            onChange={setUsername}
+            disabled={loading}
+            autoComplete="username"
+            error={usernameError}
+          />
         ) : null}
 
-        <label htmlFor="email" className="flex flex-col gap-2 text-sm text-foreground">
-          <span className="font-medium">Email</span>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            disabled={loading}
-            autoComplete="email"
-            placeholder="you@example.com"
-            className="rounded-md border bg-card px-3 py-2 text-sm text-card-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
-            aria-invalid={emailError ? 'true' : 'false'}
-          />
-          {emailError ? <p className="text-sm text-danger">{emailError}</p> : null}
-        </label>
+        <AuthTextField
+          id="email"
+          type="email"
+          label="Email"
+          value={email}
+          onChange={setEmail}
+          disabled={loading}
+          autoComplete="email"
+          error={emailError}
+        />
 
         <PasswordField
           id="password"
@@ -152,46 +187,54 @@ export function AuthForm({ mode }: AuthFormProps) {
           onChange={setPassword}
           error={passwordError ?? undefined}
           disabled={loading}
+          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+          variant="auth"
         />
 
         {mode === 'login' ? (
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <input
-              type="checkbox"
-              checked={rememberMe}
-              onChange={(event) => setRememberMe(event.target.checked)}
-              disabled={loading}
-              className="size-4 rounded border"
-            />
-            <span>Remember me</span>
-          </label>
+          <div className="flex items-center justify-between gap-3 pt-1">
+            <div className="flex items-center gap-2">
+              <input
+                id="rememberMe"
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(event) => setRememberMe(event.target.checked)}
+                disabled={loading}
+                className="size-4 rounded border-auth border-auth-line text-auth-ink focus:ring-auth-ink"
+              />
+              <label htmlFor="rememberMe" className="font-auth-body text-sm text-auth-ink">
+                Remember me
+              </label>
+            </div>
+            <Link href="/forgot-password" className="font-auth-body text-sm font-medium text-auth-ink underline">
+              Forgot password?
+            </Link>
+          </div>
         ) : null}
       </div>
 
       <button
         type="submit"
         disabled={loading}
-        className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+        className="mt-6 inline-flex min-h-[3.25rem] w-full items-center justify-center rounded-pill bg-auth-button px-4 py-2 font-auth-heading text-sm font-bold uppercase tracking-[0.08em] text-auth-button-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-70"
       >
         {loading ? 'Submitting...' : mode === 'login' ? 'Sign in' : 'Create account'}
       </button>
 
       {mode === 'login' ? (
-        <div className="mt-4 flex items-center justify-between gap-2 text-sm text-muted-foreground">
-          <Link href="/forgot-password" className="text-primary">
-            Forgot password?
+        <p className="mt-5 text-center font-auth-body text-sm text-auth-muted">
+          Need an account?{' '}
+          <Link href="/register" className="font-semibold text-auth-ink underline">
+            Create one
           </Link>
-          <Link href="/register" className="text-primary">
-            Need an account?
-          </Link>
-        </div>
+        </p>
       ) : (
-        <div className="mt-4 text-sm text-muted-foreground">
+        <p className="mt-5 text-center font-auth-body text-sm text-auth-muted">
           Already have an account?{' '}
-          <Link href="/login" className="text-primary">
+          <Link href="/login" className="font-semibold text-auth-ink underline">
             Sign in
           </Link>
-        </div>
+        </p>
       )}
     </form>
   );

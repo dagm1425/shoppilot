@@ -21,6 +21,20 @@
   --radius-sm: 0.5rem;
 
   --space-4-5: 1.125rem;
+
+  --auth-bg: 210 24% 96%;
+  --auth-panel: 0 0% 100%;
+  --auth-ink: 220 21% 16%;
+  --auth-muted: 220 10% 45%;
+  --auth-line: 220 14% 87%;
+  --auth-focus: 220 21% 16%;
+  --auth-button: 0 0% 7%;
+  --auth-button-foreground: 0 0% 100%;
+  --auth-card-max-width: 25rem;
+  --auth-input-height: 3.25rem;
+  --auth-panel-radius: 0.625rem;
+  --auth-pill-radius: 999px;
+  --auth-shadow: 0 24px 52px -30px rgba(15, 23, 42, 0.45);
 }
 
 * {
@@ -29,4 +43,15 @@
 
 body {
   @apply bg-background text-foreground antialiased;
+}
+
+@layer components {
+  .auth-floating-label {
+    @apply pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 bg-auth-panel px-1 text-sm text-auth-muted transition-all duration-150;
+  }
+
+  .auth-input:focus + .auth-floating-label,
+  .auth-input:not(:placeholder-shown) + .auth-floating-label {
+    @apply top-2 translate-y-0 text-xs text-auth-ink;
+  }
 }

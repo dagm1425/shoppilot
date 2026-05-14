@@ -5,7 +5,8 @@ export default function LoginPage() {
   return (
     <AppShell
       title="Sign in"
-      subtitle="Access your ShopPilot account to continue shopping"
+      subtitle="Use one account across checkout, orders, and account settings."
+      variant="auth"
     >
       <AuthForm mode="login" />
     </AppShell>

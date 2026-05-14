@@ -5,7 +5,8 @@ export default function RegisterPage() {
   return (
     <AppShell
       title="Create account"
-      subtitle="Register to save your cart and track orders"
+      subtitle="Create your profile to save cart activity and manage orders."
+      variant="auth"
     >
       <AuthForm mode="register" />
     </AppShell>
