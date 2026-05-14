@@ -14,12 +14,14 @@ export default function HomePage() {
         <p className="mt-2 text-sm text-muted-foreground">
           Use the health-check route to verify API readiness and environment wiring.
         </p>
-        <Link
-          href="/health-check"
-          className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-        >
-          Open health check
-        </Link>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Link
+            href="/health-check"
+            className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+          >
+            Open health check
+          </Link>
+        </div>
       </section>
       <section className="rounded-lg border bg-card p-6">
         <h2 className="text-lg font-semibold text-card-foreground">Authentication</h2>

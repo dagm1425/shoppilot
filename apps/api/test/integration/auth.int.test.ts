@@ -17,6 +17,7 @@ type AuthErrorResponse = {
 
 type MockUser = {
   id: string;
+  username: string | null;
   email: string;
   passwordHash: string;
   role: Role;
@@ -45,6 +46,7 @@ class InMemoryPrisma {
   private idCounter = 0;
   private users = new Map<string, MockUser>();
   private usersByEmail = new Map<string, string>();
+  private usersByUsername = new Map<string, string>();
   private resetTokens = new Map<string, MockResetToken>();
   private resetTokensByHash = new Map<string, string>();
 
@@ -52,6 +54,7 @@ class InMemoryPrisma {
     this.idCounter = 0;
     this.users.clear();
     this.usersByEmail.clear();
+    this.usersByUsername.clear();
     this.resetTokens.clear();
     this.resetTokensByHash.clear();
   }
@@ -82,6 +85,7 @@ class InMemoryPrisma {
   }
 
   async addUser(data: {
+    username?: string | null;
     email: string;
     passwordHash: string;
     role: Role;
@@ -89,6 +93,7 @@ class InMemoryPrisma {
     const now = new Date();
     const user: MockUser = {
       id: this.nextId('user'),
+      username: data.username ?? null,
       email: data.email,
       passwordHash: data.passwordHash,
       role: data.role,
@@ -99,20 +104,29 @@ class InMemoryPrisma {
 
     this.users.set(user.id, user);
     this.usersByEmail.set(user.email, user.id);
+    if (user.username) {
+      this.usersByUsername.set(user.username, user.id);
+    }
     return user;
   }
 
   readonly user = {
     findUnique: async (args: {
-      where: { id?: string; email?: string };
+      where: { id?: string; email?: string; username?: string | null };
       select?: {
         id?: boolean;
+        username?: boolean;
         email?: boolean;
         role?: boolean;
         sessionVersion?: boolean;
       };
     }) => {
-      const id = args.where.id ?? this.usersByEmail.get(args.where.email ?? '');
+      const id =
+        args.where.id
+        ?? this.usersByEmail.get(args.where.email ?? '')
+        ?? (typeof args.where.username === 'string'
+          ? this.usersByUsername.get(args.where.username)
+          : undefined);
       if (!id) {
         return null;
       }
@@ -128,15 +142,17 @@ class InMemoryPrisma {
 
       return {
         ...(args.select.id ? { id: user.id } : {}),
+        ...(args.select.username ? { username: user.username } : {}),
         ...(args.select.email ? { email: user.email } : {}),
         ...(args.select.role ? { role: user.role } : {}),
         ...(args.select.sessionVersion ? { sessionVersion: user.sessionVersion } : {}),
       };
     },
     create: async (args: {
-      data: { email: string; passwordHash: string; role: Role };
+      data: { username?: string | null; email: string; passwordHash: string; role: Role };
       select?: {
         id?: boolean;
+        username?: boolean;
         email?: boolean;
         role?: boolean;
         sessionVersion?: boolean;
@@ -150,6 +166,7 @@ class InMemoryPrisma {
 
       return {
         ...(args.select.id ? { id: user.id } : {}),
+        ...(args.select.username ? { username: user.username } : {}),
         ...(args.select.email ? { email: user.email } : {}),
         ...(args.select.role ? { role: user.role } : {}),
         ...(args.select.sessionVersion ? { sessionVersion: user.sessionVersion } : {}),
@@ -182,6 +199,7 @@ class InMemoryPrisma {
     deleteMany: async () => {
       this.users.clear();
       this.usersByEmail.clear();
+      this.usersByUsername.clear();
       return { count: 0 };
     },
   };
@@ -341,16 +359,18 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_1',
         email: 'customer+1@shoppilot.local',
         password: 'SecurePass123',
       }),
     });
 
     const payload = (await response.json()) as {
-      user: { email: string; role: Role };
+      user: { username: string | null; email: string; role: Role };
     };
 
     expect(response.status).toBe(201);
+    expect(payload.user.username).toBe('customer_1');
     expect(payload.user.email).toBe('customer+1@shoppilot.local');
     expect(payload.user.role).toBe(Role.CUSTOMER);
     expect(response.headers.get('set-cookie')).toContain(env.AUTH_COOKIE_NAME);
@@ -366,6 +386,7 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_2',
         email: 'customer+2@shoppilot.local',
         password: 'SecurePass123',
       }),
@@ -375,6 +396,7 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_2',
         email: 'customer+2@shoppilot.local',
         password: 'SecurePass123',
       }),
@@ -386,11 +408,39 @@ describe('Auth flows (integration)', () => {
     expect(payload.error.code).toBe('AUTH_EMAIL_EXISTS');
   });
 
+  it('rejects duplicate usernames with auth error code', async () => {
+    await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        username: 'shared_name',
+        email: 'customer+name-a@shoppilot.local',
+        password: 'SecurePass123',
+      }),
+    });
+
+    const response = await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        username: 'shared_name',
+        email: 'customer+name-b@shoppilot.local',
+        password: 'SecurePass123',
+      }),
+    });
+
+    const payload = (await response.json()) as AuthErrorResponse;
+
+    expect(response.status).toBe(409);
+    expect(payload.error.code).toBe('AUTH_USERNAME_EXISTS');
+  });
+
   it('supports login, me, and logout with session invalidation', async () => {
     await fetch(`${baseUrl}/auth/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_1',
         email: 'customer+1@shoppilot.local',
         password: 'SecurePass123',
       }),
@@ -411,7 +461,13 @@ describe('Auth flows (integration)', () => {
       headers: { cookie },
     });
 
+    const mePayload = (await meResponse.json()) as {
+      user: { username: string | null; email: string };
+    };
+
     expect(meResponse.status).toBe(200);
+    expect(mePayload.user.username).toBe('customer_1');
+    expect(mePayload.user.email).toBe('customer+1@shoppilot.local');
 
     const logoutResponse = await fetch(`${baseUrl}/auth/logout`, {
       method: 'POST',
@@ -434,6 +490,7 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_remember',
         email: 'customer+remember@shoppilot.local',
         password: 'SecurePass123',
       }),
@@ -475,6 +532,7 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_1',
         email: 'customer+1@shoppilot.local',
         password: 'OldPassword123',
       }),
@@ -562,6 +620,7 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_mail',
         email: 'customer+mail@shoppilot.local',
         password: 'SecurePass123',
       }),
@@ -595,6 +654,7 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_mailfail',
         email: 'customer+mailfail@shoppilot.local',
         password: 'SecurePass123',
       }),
@@ -620,12 +680,13 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_expired',
         email: 'customer+expired@shoppilot.local',
         password: 'OldPassword123',
       }),
     });
 
-    const resetRequest = await fetch(`${baseUrl}/auth/password-reset/request`, {
+    await fetch(`${baseUrl}/auth/password-reset/request`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email: 'customer+expired@shoppilot.local' }),
@@ -658,6 +719,7 @@ describe('Auth flows (integration)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'customer_1',
         email: 'customer+1@shoppilot.local',
         password: 'SecurePass123',
       }),
@@ -687,6 +749,7 @@ describe('Auth flows (integration)', () => {
     });
 
     await prismaMock.addUser({
+      username: 'admin_1',
       email: 'admin+1@shoppilot.local',
       passwordHash: adminHash,
       role: Role.ADMIN,
@@ -709,11 +772,14 @@ describe('Auth flows (integration)', () => {
     expect(adminProbe.status).toBe(200);
   });
 
-  it('throttles repeated login attempts', async () => {
+  it(
+    'throttles repeated login attempts',
+    async () => {
     await fetch(`${baseUrl}/auth/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        username: 'rate_limit',
         email: 'rate-limit@shoppilot.local',
         password: 'SecurePass123',
       }),
@@ -742,5 +808,7 @@ describe('Auth flows (integration)', () => {
 
     expect(throttled).toBe(true);
     expect(throttledCode).toBe('AUTH_RATE_LIMITED');
-  });
+    },
+    15_000,
+  );
 });

@@ -30,6 +30,7 @@ describe('Auth pages', () => {
         name: 'Create account',
       }),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText('Username')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create account' })).toBeInTheDocument();
   });
 });

@@ -35,6 +35,7 @@ test('login, protected account, and logout flow', async ({ page }) => {
         body: JSON.stringify({
           user: {
             id: 'user_1',
+            username: 'customer_1',
             email: 'customer@shoppilot.local',
             role: 'CUSTOMER',
           },
@@ -50,6 +51,7 @@ test('login, protected account, and logout flow', async ({ page }) => {
         body: JSON.stringify({
           user: {
             id: 'user_1',
+            username: 'customer_1',
             email: 'customer@shoppilot.local',
             role: 'CUSTOMER',
           },

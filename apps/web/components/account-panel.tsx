@@ -46,6 +46,10 @@ export function AccountPanel() {
         Signed in as <span className="font-medium text-card-foreground">{user?.email}</span>
       </p>
       <p className="mt-1 text-sm text-muted-foreground">
+        Username:{' '}
+        <span className="font-medium text-card-foreground">{user?.username ?? 'not set'}</span>
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">
         Role: <span className="font-medium text-card-foreground">{user?.role ?? 'CUSTOMER'}</span>
       </p>
 

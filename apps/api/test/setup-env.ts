@@ -8,7 +8,7 @@ process.env.JWT_SECRET =
   process.env.JWT_SECRET ?? 'replace-this-development-jwt-secret-1234';
 process.env.AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME ?? 'shoppilot_auth';
 process.env.AUTH_COOKIE_TTL_MINUTES = process.env.AUTH_COOKIE_TTL_MINUTES ?? '120';
-process.env.AUTH_RATE_LIMIT_MAX = process.env.AUTH_RATE_LIMIT_MAX ?? '10';
+process.env.AUTH_RATE_LIMIT_MAX = process.env.AUTH_RATE_LIMIT_MAX ?? '40';
 process.env.AUTH_RATE_LIMIT_WINDOW_MINUTES =
   process.env.AUTH_RATE_LIMIT_WINDOW_MINUTES ?? '15';
 process.env.AUTH_RESET_RATE_LIMIT_MAX = process.env.AUTH_RESET_RATE_LIMIT_MAX ?? '5';

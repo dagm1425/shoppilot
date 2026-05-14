@@ -48,16 +48,33 @@ export class AuthService {
       );
     }
 
+    const existingUsername = await this.prisma.user.findUnique({
+      where: { username: input.username },
+      select: { id: true },
+    });
+
+    if (existingUsername) {
+      throw new HttpException(
+        {
+          code: 'AUTH_USERNAME_EXISTS',
+          message: 'This username is already in use.',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+
     const passwordHash = await argon2.hash(input.password, { type: argon2.argon2id });
 
     const user = await this.prisma.user.create({
       data: {
+        username: input.username,
         email: input.email,
         passwordHash,
         role: Role.CUSTOMER,
       },
       select: {
         id: true,
+        username: true,
         email: true,
         role: true,
         sessionVersion: true,
@@ -76,6 +93,7 @@ export class AuthService {
     return {
       user: {
         id: user.id,
+        username: user.username,
         email: user.email,
         role: user.role,
       },
@@ -109,6 +127,7 @@ export class AuthService {
     return {
       user: {
         id: user.id,
+        username: user.username,
         email: user.email,
         role: user.role,
       },
@@ -134,6 +153,7 @@ export class AuthService {
     return {
       user: {
         id: user.id,
+        username: user.username,
         email: user.email,
         role: user.role,
       },

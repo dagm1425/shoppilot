@@ -15,7 +15,16 @@ const emailSchema = z
   .toLowerCase()
   .email('Email address is invalid.');
 
+const usernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3, 'Username must be at least 3 characters long.')
+  .max(32, 'Username must be at most 32 characters long.')
+  .regex(/^[a-z0-9_]+$/, 'Username can include lowercase letters, numbers, and underscores only.');
+
 export const registerSchema = z.object({
+  username: usernameSchema,
   email: emailSchema,
   password: passwordSchema,
 });

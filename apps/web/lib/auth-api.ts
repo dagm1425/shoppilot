@@ -15,6 +15,7 @@ type ApiError = {
 
 type AuthUser = {
   id: string;
+  username: string | null;
   email: string;
   role: 'CUSTOMER' | 'ADMIN';
 };

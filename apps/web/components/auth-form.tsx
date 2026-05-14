@@ -23,15 +23,18 @@ type AuthFormProps = {
 export function AuthForm({ mode }: AuthFormProps) {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setUsernameError(null);
     setEmailError(null);
     setPasswordError(null);
 
@@ -50,11 +53,13 @@ export function AuthForm({ mode }: AuthFormProps) {
         return;
       }
     } else {
-      const parsed = registerFormSchema.safeParse({ email, password });
+      const parsed = registerFormSchema.safeParse({ username, email, password });
       if (!parsed.success) {
         const issue = parsed.error.issues[0];
         const message = getErrorMessage(issue?.message);
-        if (issue?.path[0] === 'email') {
+        if (issue?.path[0] === 'username') {
+          setUsernameError(message);
+        } else if (issue?.path[0] === 'email') {
           setEmailError(message);
         } else if (issue?.path[0] === 'password') {
           setPasswordError(message);
@@ -71,7 +76,7 @@ export function AuthForm({ mode }: AuthFormProps) {
       const result =
         mode === 'login'
           ? await login({ email, password, rememberMe })
-          : await register({ email, password });
+          : await register({ username, email, password });
 
       if (!result.ok) {
         showToast({
@@ -106,6 +111,24 @@ export function AuthForm({ mode }: AuthFormProps) {
       </p>
 
       <div className="mt-4 flex flex-col gap-4">
+        {mode === 'register' ? (
+          <label htmlFor="username" className="flex flex-col gap-2 text-sm text-foreground">
+            <span className="font-medium">Username</span>
+            <input
+              id="username"
+              type="text"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              disabled={loading}
+              autoComplete="username"
+              placeholder="your_handle"
+              className="rounded-md border bg-card px-3 py-2 text-sm text-card-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+              aria-invalid={usernameError ? 'true' : 'false'}
+            />
+            {usernameError ? <p className="text-sm text-danger">{usernameError}</p> : null}
+          </label>
+        ) : null}
+
         <label htmlFor="email" className="flex flex-col gap-2 text-sm text-foreground">
           <span className="font-medium">Email</span>
           <input
