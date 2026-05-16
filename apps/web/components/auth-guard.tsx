@@ -97,10 +97,10 @@ export function AuthGuard({ children, allowedRoles }: AuthGuardProps) {
         description="Your account does not have permission to open this page."
       >
         <Link
-          href="/account"
+          href="/catalog"
           className="inline-flex items-center rounded-md border bg-card px-3 py-2 text-sm font-medium text-card-foreground"
         >
-          Return to account
+          Return to catalog
         </Link>
       </StatePanel>
     );

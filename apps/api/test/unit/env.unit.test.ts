@@ -46,12 +46,14 @@ describe('parseEnv', () => {
       SENTRY_DSN: 'https://public@example.ingest.sentry.io/1',
       SENTRY_SAMPLE_RATE: '1',
       SENTRY_TRACES_SAMPLE_RATE: '0.05',
+      SENTRY_PROFILES_SAMPLE_RATE: '0.1',
       RESEND_API_KEY: 're_test_dummy_api_key',
     });
 
     expect(parsed.SENTRY_ENABLED).toBe('true');
     expect(parsed.SENTRY_SAMPLE_RATE).toBe(1);
     expect(parsed.SENTRY_TRACES_SAMPLE_RATE).toBe(0.05);
+    expect(parsed.SENTRY_PROFILES_SAMPLE_RATE).toBe(0.1);
   });
 
   it('requires RESEND_API_KEY', () => {

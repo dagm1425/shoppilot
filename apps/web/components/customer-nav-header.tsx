@@ -1,19 +1,35 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import {
   LuChevronDown,
   LuHeart,
+  LuLogIn,
+  LuLogOut,
   LuMenu,
   LuSearch,
   LuShoppingBag,
   LuUser,
   LuX,
 } from 'react-icons/lu';
-import { MiniCartDrawer } from './mini-cart-drawer';
+import { fetchMe, logout } from '../lib/auth-api';
+import { useAuthStore } from '../lib/auth-store';
+import { fetchCart } from '../lib/cart-api';
+import { fetchWishlist } from '../lib/wishlist-api';
+import { reportClientError } from '../lib/client-error';
 import { cn } from '../lib/utils';
+import { useCartUiStore } from '../lib/cart-ui-store';
+import { useWishlistUiStore } from '../lib/wishlist-ui-store';
+import { showToast } from '../lib/toast-store';
+import { CartWishlistDrawer } from './cart-wishlist-drawer';
 
 type NavCategory = {
   label: string;
@@ -27,43 +43,58 @@ type NavCategory = {
 const navCategories: NavCategory[] = [
   {
     label: 'Women',
-    href: '/catalog?segment=women',
+    href: '/catalog?gender=women',
     items: [
-      { label: 'New Arrivals', href: '/catalog?segment=women&sort=new' },
-      { label: 'Leggings', href: '/catalog?segment=women&category=leggings' },
-      { label: 'Tops', href: '/catalog?segment=women&category=tops' },
-      { label: 'Training Sets', href: '/catalog?segment=women&category=sets' },
+      { label: 'New Arrivals', href: '/catalog?gender=women&sort=newest' },
+      { label: 'Bottoms', href: '/catalog?gender=women&category=bottoms' },
+      { label: 'Tops', href: '/catalog?gender=women&category=tops' },
     ],
   },
   {
     label: 'Men',
-    href: '/catalog?segment=men',
+    href: '/catalog?gender=men',
     items: [
-      { label: 'New Arrivals', href: '/catalog?segment=men&sort=new' },
-      { label: 'Oversized Tees', href: '/catalog?segment=men&category=tees' },
-      { label: 'Joggers', href: '/catalog?segment=men&category=joggers' },
-      { label: 'Shorts', href: '/catalog?segment=men&category=shorts' },
-    ],
-  },
-  {
-    label: 'Accessories',
-    href: '/catalog?segment=accessories',
-    items: [
-      { label: 'Bags', href: '/catalog?segment=accessories&category=bags' },
-      { label: 'Bottles', href: '/catalog?segment=accessories&category=bottles' },
-      { label: 'Socks', href: '/catalog?segment=accessories&category=socks' },
-      { label: 'All Accessories', href: '/catalog?segment=accessories' },
+      { label: 'New Arrivals', href: '/catalog?gender=men&sort=newest' },
+      { label: 'Tops', href: '/catalog?gender=men&category=tops' },
+      { label: 'Bottoms', href: '/catalog?gender=men&category=bottoms' },
     ],
   },
 ];
+
+function resolveGreetingName(
+  user: {
+    username: string | null;
+    email: string;
+  } | null,
+): string {
+  if (!user) {
+    return 'there';
+  }
+
+  if (user.username && user.username.trim().length > 0) {
+    return user.username.trim();
+  }
+
+  const localPart = user.email.split('@')[0];
+  if (localPart && localPart.trim().length > 0) {
+    return localPart.trim();
+  }
+
+  return 'there';
+}
 
 type DesktopCategoryProps = {
   category: NavCategory;
 };
 
 function DesktopCategory({ category }: DesktopCategoryProps) {
+  const [dismissedAfterSelection, setDismissedAfterSelection] = useState(false);
+
   return (
-    <div className="group/category relative h-full">
+    <div
+      className="group/category relative h-full"
+      onMouseLeave={() => setDismissedAfterSelection(false)}
+    >
       <Link
         href={category.href}
         className="inline-flex h-full items-center px-3 font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground transition-colors hover:text-primary focus-visible:text-primary"
@@ -73,17 +104,25 @@ function DesktopCategory({ category }: DesktopCategoryProps) {
 
       <section
         className={cn(
-          'pointer-events-none invisible absolute left-1/2 top-full z-50 w-72 -translate-x-1/2 border border-border bg-card opacity-0 shadow-lg transition',
-          'group-hover/category:pointer-events-auto group-hover/category:visible group-hover/category:opacity-100',
-          'group-focus-within/category:pointer-events-auto group-focus-within/category:visible group-focus-within/category:opacity-100',
+          'pointer-events-none invisible absolute left-1/2 top-full z-50 w-52 -translate-x-1/2 bg-card opacity-0 shadow-md transition',
+          dismissedAfterSelection
+            ? ''
+            : 'group-hover/category:pointer-events-auto group-hover/category:visible group-hover/category:opacity-100',
+          dismissedAfterSelection
+            ? ''
+            : 'group-focus-within/category:pointer-events-auto group-focus-within/category:visible group-focus-within/category:opacity-100',
         )}
       >
-        <ul className="space-y-2 p-4">
+        <ul className="space-y-1 px-2 py-2">
           {category.items.map((item) => (
             <li key={item.label}>
               <Link
                 href={item.href}
-                className="block rounded-md px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-muted hover:text-primary focus-visible:bg-muted focus-visible:text-primary"
+                onClick={(event) => {
+                  setDismissedAfterSelection(true);
+                  event.currentTarget.blur();
+                }}
+                className="block px-1 py-1.5 text-sm text-foreground transition-colors hover:text-foreground hover:underline focus-visible:text-foreground focus-visible:underline"
               >
                 {item.label}
               </Link>
@@ -119,14 +158,215 @@ function MobileCategory({ category }: DesktopCategoryProps) {
 }
 
 export function CustomerNavHeader() {
+  const router = useRouter();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [miniCartOpen, setMiniCartOpen] = useState(false);
+  const [desktopAccountMenuOpen, setDesktopAccountMenuOpen] = useState(false);
+  const [mobileAccountMenuOpen, setMobileAccountMenuOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerInitialTab, setDrawerInitialTab] = useState<'cart' | 'wishlist'>('cart');
+  const [accountActionLoading, setAccountActionLoading] = useState(false);
+  const cartItemCount = useCartUiStore((state) => state.itemCount);
+  const syncCart = useCartUiStore((state) => state.syncCart);
+  const resetSummary = useCartUiStore((state) => state.resetSummary);
+  const syncWishlist = useWishlistUiStore((state) => state.syncWishlist);
+  const resetWishlist = useWishlistUiStore((state) => state.resetWishlist);
+  const user = useAuthStore((state) => state.user);
+  const sessionChecked = useAuthStore((state) => state.sessionChecked);
+  const setUser = useAuthStore((state) => state.setUser);
+  const clearUser = useAuthStore((state) => state.clearUser);
+  const desktopAccountMenuRef = useRef<HTMLDivElement | null>(null);
+  const mobileAccountMenuRef = useRef<HTMLDivElement | null>(null);
+  const greetingName = useMemo(() => resolveGreetingName(user), [user]);
 
   useEffect(() => {
     setMobileMenuOpen(false);
-    setMiniCartOpen(false);
+    setDesktopAccountMenuOpen(false);
+    setMobileAccountMenuOpen(false);
+    setDrawerOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (sessionChecked) {
+      return;
+    }
+
+    let active = true;
+
+    async function syncSession() {
+      try {
+        const result = await fetchMe();
+        if (!active) {
+          return;
+        }
+
+        if (!result.ok) {
+          clearUser();
+          resetSummary();
+          resetWishlist();
+          return;
+        }
+
+        setUser(result.data.user);
+        const cartResult = await fetchCart();
+        const wishlistResult = await fetchWishlist();
+        if (!active) {
+          return;
+        }
+
+        if (cartResult.ok) {
+          syncCart(cartResult.data);
+        } else {
+          resetSummary();
+        }
+
+        if (wishlistResult.ok) {
+          syncWishlist(wishlistResult.data);
+        } else {
+          resetWishlist();
+        }
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        reportClientError({ error, context: 'header:fetch-me' });
+        clearUser();
+        resetSummary();
+        resetWishlist();
+      }
+    }
+
+    void syncSession();
+
+    return () => {
+      active = false;
+    };
+  }, [clearUser, resetSummary, resetWishlist, sessionChecked, setUser, syncCart, syncWishlist]);
+
+  useEffect(() => {
+    if (!desktopAccountMenuOpen) {
+      return;
+    }
+
+    function handleOutsidePointerDown(event: MouseEvent) {
+      if (!desktopAccountMenuRef.current?.contains(event.target as Node)) {
+        setDesktopAccountMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setDesktopAccountMenuOpen(false);
+      }
+    }
+
+    window.addEventListener('mousedown', handleOutsidePointerDown);
+    window.addEventListener('keydown', handleEscape);
+
+    return () => {
+      window.removeEventListener('mousedown', handleOutsidePointerDown);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [desktopAccountMenuOpen]);
+
+  useEffect(() => {
+    if (!mobileAccountMenuOpen) {
+      return;
+    }
+
+    function handleOutsidePointerDown(event: MouseEvent) {
+      if (!mobileAccountMenuRef.current?.contains(event.target as Node)) {
+        setMobileAccountMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMobileAccountMenuOpen(false);
+      }
+    }
+
+    window.addEventListener('mousedown', handleOutsidePointerDown);
+    window.addEventListener('keydown', handleEscape);
+
+    return () => {
+      window.removeEventListener('mousedown', handleOutsidePointerDown);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [mobileAccountMenuOpen]);
+
+  useEffect(() => {
+    function handleOpenCartDrawer() {
+      setDrawerInitialTab('cart');
+      setDrawerOpen(true);
+    }
+
+    window.addEventListener('cart:open-drawer', handleOpenCartDrawer);
+
+    return () => {
+      window.removeEventListener('cart:open-drawer', handleOpenCartDrawer);
+    };
+  }, []);
+
+  function navigateToSignIn() {
+    setDesktopAccountMenuOpen(false);
+    setMobileAccountMenuOpen(false);
+    router.push('/login');
+  }
+
+  function openDrawer(tab: 'cart' | 'wishlist') {
+    setDrawerInitialTab(tab);
+    setDrawerOpen(true);
+  }
+
+  async function handleSignOut() {
+    setAccountActionLoading(true);
+
+    try {
+      const result = await logout();
+      if (!result.ok) {
+        showToast({
+          variant: 'error',
+          message: result.message,
+        });
+        return;
+      }
+
+      clearUser();
+      resetSummary();
+      resetWishlist();
+      setDesktopAccountMenuOpen(false);
+      setMobileAccountMenuOpen(false);
+      router.push('/login');
+    } catch (error) {
+      reportClientError({ error, context: 'header:logout' });
+      showToast({
+        variant: 'error',
+        message: 'Unable to sign out right now.',
+      });
+    } finally {
+      setAccountActionLoading(false);
+    }
+  }
+
+  function submitCatalogSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const rawQuery = formData.get('q');
+    const query = typeof rawQuery === 'string' ? rawQuery.trim() : '';
+    const params = new URLSearchParams({
+      page: '1',
+      pageSize: '12',
+    });
+
+    if (query.length > 0) {
+      params.set('q', query);
+    }
+
+    router.push(`/catalog?${params.toString()}`);
+  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-card">
@@ -137,7 +377,7 @@ export function CustomerNavHeader() {
         Skip to content
       </a>
 
-      <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-2 px-3 sm:px-5 lg:px-8">
+      <div className="mx-auto flex h-16 w-full max-w-[92rem] items-center gap-2 px-3 sm:px-5 lg:px-8">
         <button
           type="button"
           aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
@@ -163,47 +403,91 @@ export function CustomerNavHeader() {
           {navCategories.map((category) => (
             <DesktopCategory key={category.label} category={category} />
           ))}
+          <Link
+            href="/catalog"
+            className="inline-flex h-full items-center px-3 font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground transition-colors hover:text-primary focus-visible:text-primary"
+          >
+            See all
+          </Link>
         </nav>
 
         <div className="ml-auto hidden items-center gap-2 md:flex">
-          <label htmlFor="desktop-nav-search" className="sr-only">
-            Search products
-          </label>
-          <div className="relative">
+          <form onSubmit={submitCatalogSearch} className="relative">
+            <label htmlFor="desktop-nav-search" className="sr-only">
+              Search products
+            </label>
             <LuSearch
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
             />
             <input
               id="desktop-nav-search"
+              name="q"
               type="search"
               placeholder="What are you looking for?"
               className="h-10 w-72 rounded-full border border-border bg-muted pl-9 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
             />
-          </div>
-          <Link
-            href="/account"
+            <button type="submit" className="sr-only">
+              Search
+            </button>
+          </form>
+          <button
+            type="button"
             aria-label="Wishlist"
-            className="inline-flex size-10 items-center justify-center rounded-md border border-border text-foreground transition-colors hover:bg-muted"
+            onClick={() => openDrawer('wishlist')}
+            className="inline-flex size-10 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
           >
             <LuHeart className="size-4" aria-hidden="true" />
-          </Link>
-          <Link
-            href="/account"
-            aria-label="Account"
-            className="inline-flex size-10 items-center justify-center rounded-md border border-border text-foreground transition-colors hover:bg-muted"
-          >
-            <LuUser className="size-4" aria-hidden="true" />
-          </Link>
+          </button>
+          <div ref={desktopAccountMenuRef} className="relative">
+            <button
+              type="button"
+              aria-label="Account menu"
+              aria-expanded={desktopAccountMenuOpen}
+              onClick={() => setDesktopAccountMenuOpen((open) => !open)}
+              className="inline-flex size-10 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
+            >
+              <LuUser className="size-4" aria-hidden="true" />
+            </button>
+            {desktopAccountMenuOpen ? (
+              <div className="absolute right-0 top-[calc(100%+0.5rem)] w-44 rounded-md border border-border bg-card p-2.5 shadow-md">
+                {user ? (
+                  <div className="space-y-3">
+                    <p className="text-center text-base text-foreground">
+                      Hi, <span className="font-semibold">{greetingName}</span>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleSignOut}
+                      disabled={accountActionLoading}
+                      className="inline-flex w-full items-center justify-center gap-2.5 rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      <LuLogOut className="size-4" aria-hidden="true" />
+                      {accountActionLoading ? 'Signing out...' : 'Sign out'}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={navigateToSignIn}
+                    className="inline-flex w-full items-center justify-center gap-2.5 rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background"
+                  >
+                    <LuLogIn className="size-4" aria-hidden="true" />
+                    Sign in
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             aria-label="Cart"
-            onClick={() => setMiniCartOpen(true)}
-            className="relative inline-flex size-10 items-center justify-center rounded-md border border-border text-foreground transition-colors hover:bg-muted"
+            onClick={() => openDrawer('cart')}
+            className="relative inline-flex size-10 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
           >
             <LuShoppingBag className="size-4" aria-hidden="true" />
             <span className="absolute -right-1 -top-1 inline-flex min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-xs font-bold leading-4 text-background">
-              0
+              {cartItemCount}
             </span>
           </button>
         </div>
@@ -216,40 +500,87 @@ export function CustomerNavHeader() {
           >
             <LuSearch className="size-4" aria-hidden="true" />
           </button>
-          <Link
-            href="/account"
-            aria-label="Account"
-            className="inline-flex size-10 items-center justify-center rounded-md border border-border text-foreground transition-colors hover:bg-muted"
+          <button
+            type="button"
+            aria-label="Wishlist"
+            onClick={() => openDrawer('wishlist')}
+            className="inline-flex size-10 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
           >
-            <LuUser className="size-4" aria-hidden="true" />
-          </Link>
+            <LuHeart className="size-4" aria-hidden="true" />
+          </button>
+          <div ref={mobileAccountMenuRef} className="relative">
+            <button
+              type="button"
+              aria-label="Account menu"
+              aria-expanded={mobileAccountMenuOpen}
+              onClick={() => setMobileAccountMenuOpen((open) => !open)}
+              className="inline-flex size-10 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
+            >
+              <LuUser className="size-4" aria-hidden="true" />
+            </button>
+            {mobileAccountMenuOpen ? (
+              <div className="absolute right-0 top-[calc(100%+0.5rem)] z-40 w-44 rounded-md border border-border bg-card p-2.5 shadow-md">
+                {user ? (
+                  <div className="space-y-3">
+                    <p className="text-center text-base text-foreground">
+                      Hi, <span className="font-semibold">{greetingName}</span>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleSignOut}
+                      disabled={accountActionLoading}
+                      className="inline-flex w-full items-center justify-center gap-2.5 rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      <LuLogOut className="size-4" aria-hidden="true" />
+                      {accountActionLoading ? 'Signing out...' : 'Sign out'}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={navigateToSignIn}
+                    className="inline-flex w-full items-center justify-center gap-2.5 rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background"
+                  >
+                    <LuLogIn className="size-4" aria-hidden="true" />
+                    Sign in
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             aria-label="Cart"
-            onClick={() => setMiniCartOpen(true)}
-            className="relative inline-flex size-10 items-center justify-center rounded-md border border-border text-foreground transition-colors hover:bg-muted"
+            onClick={() => openDrawer('cart')}
+            className="relative inline-flex size-10 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
           >
             <LuShoppingBag className="size-4" aria-hidden="true" />
             <span className="absolute -right-1 -top-1 inline-flex min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-xs font-bold leading-4 text-background">
-              0
+              {cartItemCount}
             </span>
           </button>
         </div>
       </div>
 
       <div className="border-t border-border px-3 py-3 md:hidden">
-        <label htmlFor="mobile-nav-search" className="sr-only">
-          Search products
-        </label>
-        <div className="flex h-10 items-center rounded-full border border-border bg-muted px-3">
-          <LuSearch className="size-4 text-muted-foreground" aria-hidden="true" />
-          <input
-            id="mobile-nav-search"
-            type="search"
-            placeholder="Search catalog"
-            className="ml-2 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-          />
-        </div>
+        <form onSubmit={submitCatalogSearch}>
+          <label htmlFor="mobile-nav-search" className="sr-only">
+            Search products
+          </label>
+          <div className="flex h-10 items-center rounded-full border border-border bg-muted px-3">
+            <LuSearch className="size-4 text-muted-foreground" aria-hidden="true" />
+            <input
+              id="mobile-nav-search"
+              name="q"
+              type="search"
+              placeholder="Search catalog"
+              className="ml-2 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+            />
+            <button type="submit" className="sr-only">
+              Search
+            </button>
+          </div>
+        </form>
       </div>
 
       {mobileMenuOpen ? (
@@ -258,11 +589,21 @@ export function CustomerNavHeader() {
             {navCategories.map((category) => (
               <MobileCategory key={category.label} category={category} />
             ))}
+            <Link
+              href="/catalog"
+              className="block rounded-lg border border-border bg-card px-4 py-3 font-auth-heading text-sm font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-muted"
+            >
+              See all
+            </Link>
           </nav>
         </div>
       ) : null}
 
-      <MiniCartDrawer open={miniCartOpen} onClose={() => setMiniCartOpen(false)} />
+      <CartWishlistDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        initialTab={drawerInitialTab}
+      />
     </header>
   );
 }

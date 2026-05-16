@@ -15,6 +15,8 @@ model User {
   role              Role                 @default(CUSTOMER)
   sessionVersion    Int                  @default(0)
   passwordResetKeys PasswordResetToken[]
+  cart              Cart?
+  wishlist          Wishlist?
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
@@ -79,7 +81,104 @@ model EmailEventPlaceholder {
   @@map("email_event_placeholders")
 }
 
+model Product {
+  id                String          @id @default(cuid())
+  slug              String          @unique
+  name              String
+  description       String
+  category          ProductCategory
+  gender            ProductGender
+  fit               String
+  color             String
+  priceCents        Int
+  currency          String          @default("USD")
+  available         Boolean         @default(true)
+  stock             Int             @default(0)
+  primaryImageUrl   String
+  secondaryImageUrl String?
+  cartItems         CartItem[]
+  wishlistItems     WishlistItem[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([category, createdAt], map: "products_category_created_at_idx")
+  @@index([gender, category, createdAt], map: "products_gender_category_created_at_idx")
+  @@index([name], map: "products_name_idx")
+  @@map("products")
+}
+
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  size      ProductSize
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, productId, size], map: "cart_items_cart_id_product_id_size_key")
+  @@index([cartId], map: "cart_items_cart_id_idx")
+  @@index([productId], map: "cart_items_product_id_idx")
+  @@map("cart_items")
+}
+
+model Wishlist {
+  id        String         @id @default(cuid())
+  userId    String         @unique
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     WishlistItem[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@map("wishlists")
+}
+
+model WishlistItem {
+  id         String    @id @default(cuid())
+  wishlistId String
+  wishlist   Wishlist  @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([wishlistId, productId], map: "wishlist_items_wishlist_id_product_id_key")
+  @@index([wishlistId], map: "wishlist_items_wishlist_id_idx")
+  @@index([productId], map: "wishlist_items_product_id_idx")
+  @@map("wishlist_items")
+}
+
 enum Role {
   CUSTOMER
   ADMIN
+}
+
+enum ProductCategory {
+  BOTTOMS
+  TOPS
+}
+
+enum ProductGender {
+  MEN
+  WOMEN
+}
+
+enum ProductSize {
+  S
+  M
+  L
+  XL
 }

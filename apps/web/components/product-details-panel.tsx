@@ -1,219 +1,190 @@
 'use client';
 
-import Link from 'next/link';
-import { useMemo, useState } from 'react';
-import {
-  LuHeart,
-  LuMinus,
-  LuPlus,
-  LuRuler,
-  LuShare2,
-  LuTruck,
-  LuZap,
-} from 'react-icons/lu';
-import { cn } from '../lib/utils';
-
-type ProductVariant = {
-  id: string;
-  label: string;
-  image: string;
-};
-
-type ProductSize = {
-  label: string;
-  value: string;
-  disabled?: boolean;
-};
-
-type ProductAccordionSection = {
-  id: 'description' | 'delivery';
-  title: string;
-  content: string;
-};
+import type { CartProductSize } from '@shoppilot/db/cart-contract';
+import { useEffect, useState } from 'react';
+import { LuMinus, LuPlus, LuShare2, LuStar } from 'react-icons/lu';
+import { AddToCartButton } from './cart-wishlist/add-to-cart-button';
+import { WishlistToggleButton } from './cart-wishlist/wishlist-toggle-button';
 
 export type ProductDetails = {
-  id: string;
+  productId: string;
   name: string;
+  description: string;
   fit: string;
-  price: string;
-  isNew?: boolean;
-  variants: ProductVariant[];
-  sizes: ProductSize[];
-  accordionSections: ProductAccordionSection[];
+  color: string;
+  priceLabel: string;
+  available: boolean;
+  stock: number;
 };
 
 type ProductDetailsPanelProps = {
   product: ProductDetails;
 };
 
-const DEFAULT_OPEN_SECTIONS: Record<ProductAccordionSection['id'], boolean> = {
-  description: false,
-  delivery: false,
-};
+const SIZE_OPTIONS: CartProductSize[] = ['s', 'm', 'l', 'xl'];
 
 export function ProductDetailsPanel({ product }: ProductDetailsPanelProps) {
-  const [selectedVariantId, setSelectedVariantId] = useState(product.variants[0]?.id ?? '');
-  const [selectedSize, setSelectedSize] = useState<string | null>(
-    product.sizes.find((size) => size.value === 'm' && !size.disabled)?.value ?? null,
-  );
-  const [openSections, setOpenSections] = useState(DEFAULT_OPEN_SECTIONS);
+  const [quantity, setQuantity] = useState(1);
+  const [selectedSize, setSelectedSize] = useState<CartProductSize | null>(null);
 
-  const selectedVariant = useMemo(
-    () => product.variants.find((variant) => variant.id === selectedVariantId) ?? product.variants[0],
-    [product.variants, selectedVariantId],
-  );
+  const maxQuantity = Math.max(1, product.stock);
 
-  function toggleSection(sectionId: ProductAccordionSection['id']) {
-    setOpenSections((current) => ({ ...current, [sectionId]: !current[sectionId] }));
+  useEffect(() => {
+    setQuantity(1);
+    setSelectedSize(null);
+  }, [product.productId]);
+
+  function handleDecreaseQuantity() {
+    setQuantity((current) => Math.max(1, current - 1));
+  }
+
+  function handleIncreaseQuantity() {
+    setQuantity((current) => Math.min(maxQuantity, current + 1));
   }
 
   return (
-    <section className="w-full max-w-md border border-border bg-card p-5 sm:p-6">
-      <header className="flex flex-col">
-        {product.isNew ? (
-          <span className="mb-4 inline-flex h-6 w-fit items-center rounded-sm bg-muted px-2 font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground">
-            New
-          </span>
-        ) : null}
-
-        <h1 className="font-auth-heading text-xl font-bold uppercase tracking-tight text-foreground sm:text-2xl">
+    <section className="w-full max-w-[25.625rem] font-auth-body">
+      <header>
+        <h1 className="font-auth-heading text-[1.125rem] font-bold uppercase leading-[1.35] text-foreground">
           {product.name}
         </h1>
-        <p className="mt-2 text-sm capitalize text-muted-foreground">{product.fit}</p>
-        <p className="mt-2 text-sm font-bold text-foreground">US{product.price}</p>
+        <p className="mt-1 text-sm capitalize leading-5 text-muted-foreground">{product.fit}</p>
+        <p className="mt-2 text-sm font-bold leading-5 text-foreground">{product.priceLabel}</p>
       </header>
 
-      <section className="flex gap-2 py-7">
+      <section className="flex items-center justify-between border-y border-border py-6">
         <button
           type="button"
-          aria-label="Add to wishlist"
-          className="inline-flex size-11 items-center justify-center rounded-full border border-border text-foreground transition-colors duration-200 hover:bg-muted"
+          className="inline-flex items-center gap-1 text-sm leading-5 text-foreground transition-colors hover:text-muted-foreground"
         >
-          <LuHeart className="size-5" aria-hidden="true" />
+          <LuStar className="size-3.5 fill-foreground text-foreground" aria-hidden="true" />
+          <span>Reviews</span>
         </button>
-        <button
-          type="button"
-          aria-label="Share product"
-          className="inline-flex size-11 items-center justify-center rounded-full border border-border text-foreground transition-colors duration-200 hover:bg-muted"
-        >
-          <LuShare2 className="size-5" aria-hidden="true" />
-        </button>
-      </section>
-
-      <section className="mb-7">
-        <div className="mb-3 flex flex-wrap gap-2">
-          {product.variants.map((variant) => {
-            const active = selectedVariantId === variant.id;
-
-            return (
-              <button
-                key={variant.id}
-                type="button"
-                onClick={() => setSelectedVariantId(variant.id)}
-                className={cn(
-                  'relative w-12 overflow-hidden border transition-colors duration-200',
-                  active ? 'border-2 border-foreground' : 'border-transparent hover:border-border',
-                )}
-                aria-pressed={active}
-                aria-label={`Select ${variant.label}`}
-              >
-                <span className="sr-only">{variant.label}</span>
-                <img alt={variant.label} src={variant.image} className="aspect-[4/5] w-full object-cover" />
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-xs text-muted-foreground">{selectedVariant?.label}</p>
-      </section>
-
-      <section className="mb-6">
-        <div className="mb-4 flex items-end justify-between px-1">
-          <p className="text-xs font-medium text-muted-foreground">Select a size</p>
+        <div className="flex items-center gap-2">
+          <WishlistToggleButton
+            productId={product.productId}
+            className="inline-flex size-8 items-center justify-center text-foreground transition-colors hover:text-muted-foreground disabled:opacity-70"
+            iconClassName="size-4"
+          />
           <button
             type="button"
-            className="inline-flex items-center gap-1 text-xs font-bold text-foreground underline underline-offset-2 transition-colors duration-200 hover:text-muted-foreground"
+            aria-label="Share product"
+            className="inline-flex size-8 items-center justify-center text-foreground transition-colors hover:text-muted-foreground"
           >
-            <LuRuler className="size-3.5" aria-hidden="true" />
+            <LuShare2 className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+      </section>
+
+      <section className="pb-8 pt-6">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex size-8 items-center justify-center border border-border bg-muted" />
+          <span className="text-sm leading-5 text-foreground">{product.color}</span>
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center justify-between px-2">
+          <p className="text-sm leading-5 text-foreground">Select a size</p>
+          <button
+            type="button"
+            className="text-xs font-bold leading-4 text-foreground underline underline-offset-2"
+          >
             Size Guide
           </button>
         </div>
 
-        <div className="grid grid-cols-4 gap-1 rounded-sm border border-border p-4">
-          {product.sizes.map((size) => {
-            const active = selectedSize === size.value;
+        <section className="rounded-sm border border-border p-2">
+          <div className="grid grid-cols-4 gap-1">
+            {SIZE_OPTIONS.map((size) => {
+              const active = selectedSize === size;
 
-            return (
-              <button
-                key={size.value}
-                type="button"
-                disabled={size.disabled}
-                onClick={() => setSelectedSize(size.value)}
-                className={cn(
-                  'h-12 border text-xs uppercase transition-colors duration-200',
-                  active ? 'border-foreground bg-foreground font-bold text-background' : 'border-transparent text-foreground hover:border-border',
-                  size.disabled ? 'cursor-not-allowed border-transparent text-muted-foreground line-through opacity-60 hover:border-transparent' : '',
-                )}
-                aria-pressed={active}
-              >
-                {size.label}
-              </button>
-            );
-          })}
-        </div>
-      </section>
+              return (
+                <button
+                  key={size}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setSelectedSize(size)}
+                  className={`inline-flex h-12 items-center justify-center px-2 text-xs font-medium uppercase leading-3 transition-colors ${
+                    active
+                      ? 'bg-foreground text-background'
+                      : 'bg-card text-foreground hover:bg-muted'
+                  }`}
+                >
+                  {size.toUpperCase()}
+                </button>
+              );
+            })}
+          </div>
 
-      <section className="mb-7">
-        <button
-          type="button"
-          className="w-full rounded-full bg-foreground px-5 py-4 font-auth-heading text-sm font-bold uppercase tracking-wider text-background transition-colors duration-200 hover:bg-foreground/90"
-        >
-          Add to bag
-        </button>
-      </section>
-
-      <section className="mb-7 rounded-sm border border-border p-4">
-        <ul className="space-y-4">
-          <li className="flex items-start gap-3">
-            <LuTruck className="mt-0.5 size-4 text-foreground" aria-hidden="true" />
-            <p className="text-sm leading-5 text-foreground">
-              Prices and thresholds vary. Refer to our{' '}
-              <Link href="#" className="underline underline-offset-2">
-                delivery information
-              </Link>
+          <div className="flex items-center justify-center py-4">
+            <p className="text-center text-xs leading-4 text-muted-foreground">
+              Customers say it fits{' '}
+              <span className="font-medium text-foreground">true to size</span>
             </p>
-          </li>
-          <li className="flex items-start gap-3">
-            <LuZap className="mt-0.5 size-4 text-foreground" aria-hidden="true" />
-            <p className="text-sm leading-5 text-foreground">Express Delivery Available</p>
-          </li>
-        </ul>
+          </div>
+        </section>
+
+        <div>
+          {selectedSize ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Selected size: {selectedSize.toUpperCase()}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Select a size before adding to bag.
+            </p>
+          )}
+        </div>
+
+        <div className="mb-4 mt-6 flex items-center justify-between gap-4">
+          <p className="text-sm leading-5 text-foreground">Quantity</p>
+          <div className="inline-flex items-center rounded-sm border border-border bg-card">
+            <button
+              type="button"
+              aria-label="Decrease quantity"
+              onClick={handleDecreaseQuantity}
+              disabled={!product.available || quantity <= 1}
+              className="inline-flex size-9 items-center justify-center text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground"
+            >
+              <LuMinus className="size-3.5" aria-hidden="true" />
+            </button>
+            <span className="w-12 text-center text-sm text-foreground">{quantity}</span>
+            <button
+              type="button"
+              aria-label="Increase quantity"
+              onClick={handleIncreaseQuantity}
+              disabled={!product.available || quantity >= maxQuantity}
+              className="inline-flex size-9 items-center justify-center text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground"
+            >
+              <LuPlus className="size-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+
+        <AddToCartButton
+          productId={product.productId}
+          size={selectedSize ?? 'm'}
+          quantity={quantity}
+          disabled={!product.available || !selectedSize}
+          label={product.available ? (selectedSize ? 'Add to bag' : 'Select size') : 'Out of stock'}
+          onAdded={() => {
+            window.dispatchEvent(new CustomEvent('cart:open-drawer'));
+          }}
+          className="inline-flex h-[3.375rem] w-full items-center justify-center gap-2 rounded-pill bg-foreground px-8 font-auth-heading text-sm font-bold uppercase tracking-[0.04em] text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:bg-muted-foreground"
+        />
+        <p className="mt-2 text-xs leading-4 text-muted-foreground">
+          {product.available
+            ? `${product.stock} units available`
+            : 'This item is currently unavailable.'}
+        </p>
       </section>
 
-      <section className="border-t border-border">
-        {product.accordionSections.map((section) => {
-          const open = openSections[section.id];
-
-          return (
-            <div key={section.id} className="border-b border-border">
-              <button
-                type="button"
-                onClick={() => toggleSection(section.id)}
-                className="flex w-full items-center justify-between py-5 text-left"
-                aria-expanded={open}
-              >
-                <span className="font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground transition-colors duration-200 hover:text-muted-foreground">
-                  {section.title}
-                </span>
-                {open ? (
-                  <LuMinus className="size-3.5 text-foreground" aria-hidden="true" />
-                ) : (
-                  <LuPlus className="size-3.5 text-foreground" aria-hidden="true" />
-                )}
-              </button>
-              {open ? <p className="pb-5 text-sm leading-6 text-muted-foreground">{section.content}</p> : null}
-            </div>
-          );
-        })}
+      <section className="mt-8 border-t border-border pt-5">
+        <h2 className="text-sm font-semibold uppercase leading-5 tracking-wide text-foreground">
+          Description
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{product.description}</p>
       </section>
     </section>
   );

@@ -5,6 +5,24 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./catalog-contract": {
+      "types": "./dist/catalog-contract.d.ts",
+      "default": "./dist/catalog-contract.js"
+    },
+    "./cart-contract": {
+      "types": "./dist/cart-contract.d.ts",
+      "default": "./dist/cart-contract.js"
+    },
+    "./wishlist-contract": {
+      "types": "./dist/wishlist-contract.d.ts",
+      "default": "./dist/wishlist-contract.js"
+    }
+  },
   "scripts": {
     "dev": "tsc -w -p tsconfig.json",
     "build": "tsc -p tsconfig.json",

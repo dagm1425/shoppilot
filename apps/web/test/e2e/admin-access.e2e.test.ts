@@ -8,7 +8,7 @@ function buildCorsHeaders(origin: string) {
   return {
     'access-control-allow-origin': origin,
     'access-control-allow-credentials': 'true',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
     'access-control-allow-headers': 'content-type',
     'content-type': 'application/json',
   };
@@ -72,6 +72,83 @@ test('redirects unauthenticated admin route access to login and returns after su
             username: 'admin_1',
             email: 'admin@shoppilot.local',
             role: 'ADMIN',
+          },
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: { message: 'Not found.' } }),
+    });
+  });
+
+  await page.route('**/cart**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.port !== '4000') {
+      await route.continue();
+      return;
+    }
+
+    const origin = request.headers().origin ?? 'http://127.0.0.1:3000';
+    const corsHeaders = buildCorsHeaders(origin);
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
+      return;
+    }
+
+    if (url.pathname.endsWith('/cart') && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          items: [],
+          summary: {
+            itemCount: 0,
+            validLineCount: 0,
+            subtotalCents: 0,
+            currency: 'USD',
+          },
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: { message: 'Not found.' } }),
+    });
+  });
+
+  await page.route('**/wishlist**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.port !== '4000') {
+      await route.continue();
+      return;
+    }
+
+    const origin = request.headers().origin ?? 'http://127.0.0.1:3000';
+    const corsHeaders = buildCorsHeaders(origin);
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
+      return;
+    }
+
+    if (url.pathname.endsWith('/wishlist') && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          items: [],
+          summary: {
+            itemCount: 0,
           },
         }),
       });

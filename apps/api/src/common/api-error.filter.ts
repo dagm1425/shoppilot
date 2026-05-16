@@ -40,7 +40,7 @@ export class ApiErrorFilter implements ExceptionFilter {
 
     this.logger.error({
       message: 'Request failed',
-      phase: request.url.startsWith('/auth') ? 'phase-1.1' : 'phase-0',
+      phase: this.resolvePhase(request.url),
       requestId: traceId,
       userId: request.user?.id,
       method: request.method,
@@ -105,9 +105,37 @@ export class ApiErrorFilter implements ExceptionFilter {
         }
       }
 
+      if (path.startsWith('/cart') && status === HttpStatus.UNAUTHORIZED) {
+        return 'AUTH_UNAUTHORIZED';
+      }
+
+      if (path.startsWith('/wishlist') && status === HttpStatus.UNAUTHORIZED) {
+        return 'AUTH_UNAUTHORIZED';
+      }
+
       return `HTTP_${status}`;
     }
 
     return 'INTERNAL_SERVER_ERROR';
+  }
+
+  private resolvePhase(path: string): string {
+    if (path.startsWith('/auth')) {
+      return 'phase-1.1';
+    }
+
+    if (path.startsWith('/products')) {
+      return 'phase-1.3';
+    }
+
+    if (path.startsWith('/cart')) {
+      return 'phase-1.4';
+    }
+
+    if (path.startsWith('/wishlist')) {
+      return 'phase-1.4';
+    }
+
+    return 'phase-0';
   }
 }

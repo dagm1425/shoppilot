@@ -10,8 +10,8 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@shoppilot/db": ["packages/db/src"],
-      "@shoppilot/db/*": ["packages/db/src/*"]
+      "@shoppilot/db": ["packages/db/src/index.ts"],
+      "@shoppilot/db/*": ["packages/db/src/*.ts"]
     }
   }
 }

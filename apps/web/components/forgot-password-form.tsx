@@ -55,38 +55,47 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-6">
-      <h2 className="text-lg font-semibold text-card-foreground">Forgot password</h2>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Enter your email to receive password reset instructions.
+    <form
+      onSubmit={handleSubmit}
+      className="rounded-auth border-auth border-auth-line bg-auth-panel px-7 py-8 shadow-auth"
+    >
+      <h2 className="sr-only">Forgot password form</h2>
+      <p className="text-center font-auth-body text-sm text-auth-muted">
+        Enter your account email and we&apos;ll send a secure reset link.
       </p>
 
-      <label htmlFor="email" className="mt-4 flex flex-col gap-2 text-sm text-foreground">
-        <span className="font-medium">Email</span>
-        <input
-          id="email"
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          disabled={loading}
-          autoComplete="email"
-          placeholder="you@example.com"
-          className="rounded-md border bg-card px-3 py-2 text-sm text-card-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
-          aria-invalid={emailError ? 'true' : 'false'}
-        />
-        {emailError ? <p className="text-sm text-danger">{emailError}</p> : null}
-      </label>
+      <div className="mt-6 flex flex-col gap-3">
+        <div className="space-y-1.5">
+          <div className="relative">
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              disabled={loading}
+              autoComplete="email"
+              placeholder="Email"
+              className="auth-input h-auth-input w-full rounded-auth border-auth border-auth-line bg-auth-panel px-4 pb-2 pt-6 font-auth-body text-base text-auth-ink outline-none transition-colors duration-150 placeholder:text-transparent focus:border-auth-focus disabled:cursor-not-allowed disabled:opacity-70"
+              aria-invalid={emailError ? 'true' : 'false'}
+            />
+            <label htmlFor="email" className="auth-floating-label">
+              Email
+            </label>
+          </div>
+          {emailError ? <p className="text-xs text-danger">{emailError}</p> : null}
+        </div>
 
-      {success ? (
-        <p className="mt-4 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-foreground">
-          {success}
-        </p>
-      ) : null}
+        {success ? (
+          <p className="rounded-auth border-auth border-auth-line bg-auth-bg px-4 py-3 text-center font-auth-body text-sm text-auth-ink">
+            {success}
+          </p>
+        ) : null}
+      </div>
 
       <button
         type="submit"
         disabled={loading}
-        className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+        className="mt-6 inline-flex min-h-[3.25rem] w-full items-center justify-center rounded-pill bg-auth-button px-4 py-2 font-auth-heading text-sm font-bold uppercase tracking-[0.08em] text-auth-button-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-70"
       >
         {loading ? 'Submitting...' : 'Request reset'}
       </button>

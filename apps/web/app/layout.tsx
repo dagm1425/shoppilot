@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${montserrat.variable} ${roboto.variable}`}>
+      <body suppressHydrationWarning className={`${montserrat.variable} ${roboto.variable}`}>
         {children}
         <GlobalToaster />
       </body>

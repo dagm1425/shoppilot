@@ -5,12 +5,16 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { PasswordField } from './password-field';
 import { login, register } from '../lib/auth-api';
+import { fetchCart } from '../lib/cart-api';
+import { fetchWishlist } from '../lib/wishlist-api';
 import {
   getErrorMessage,
   loginFormSchema,
   registerFormSchema,
 } from '../lib/auth-form-schemas';
 import { useAuthStore } from '../lib/auth-store';
+import { useCartUiStore } from '../lib/cart-ui-store';
+import { useWishlistUiStore } from '../lib/wishlist-ui-store';
 import { reportClientError } from '../lib/client-error';
 import { showToast } from '../lib/toast-store';
 
@@ -34,7 +38,7 @@ type AuthTextFieldProps = {
 
 function resolvePostAuthRedirect(rawRedirect: string | null): string {
   if (!rawRedirect || !rawRedirect.startsWith('/') || rawRedirect.startsWith('//')) {
-    return '/account';
+    return '/catalog';
   }
 
   return rawRedirect;
@@ -76,6 +80,10 @@ function AuthTextField({
 export function AuthForm({ mode, postLoginRedirect = null }: AuthFormProps) {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
+  const syncCart = useCartUiStore((state) => state.syncCart);
+  const resetSummary = useCartUiStore((state) => state.resetSummary);
+  const syncWishlist = useWishlistUiStore((state) => state.syncWishlist);
+  const resetWishlist = useWishlistUiStore((state) => state.resetWishlist);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -140,10 +148,29 @@ export function AuthForm({ mode, postLoginRedirect = null }: AuthFormProps) {
       }
 
       setUser(result.data.user);
+      if (mode === 'login') {
+        try {
+          const [cartResult, wishlistResult] = await Promise.all([fetchCart(), fetchWishlist()]);
+          if (cartResult.ok) {
+            syncCart(cartResult.data);
+          } else {
+            resetSummary();
+          }
+
+          if (wishlistResult.ok) {
+            syncWishlist(wishlistResult.data);
+          } else {
+            resetWishlist();
+          }
+        } catch {
+          resetSummary();
+          resetWishlist();
+        }
+      }
       const nextRoute =
         mode === 'login'
           ? resolvePostAuthRedirect(postLoginRedirect)
-          : '/account';
+          : '/catalog';
       router.push(nextRoute);
     } catch (error) {
       reportClientError({ error, context: `${mode}:submit` });

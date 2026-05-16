@@ -4,8 +4,11 @@ const webEnvSchema = z.object({
   NEXT_PUBLIC_API_BASE_URL: z.string().url(),
   NEXT_PUBLIC_SENTRY_ENABLED: z.enum(['true', 'false']).default('false'),
   NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),
-  NEXT_PUBLIC_SENTRY_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(1),
-  NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.05),
+  NEXT_PUBLIC_SENTRY_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
+  NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
+  NEXT_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
+  NEXT_PUBLIC_SENTRY_REPLAYS_SESSION_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
+  NEXT_PUBLIC_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
 }).superRefine((input, context) => {
   if (input.NEXT_PUBLIC_SENTRY_ENABLED !== 'true') {
     return;

@@ -4,21 +4,24 @@ async function waitForClientHydration(page: Page) {
   await page.waitForLoadState('domcontentloaded');
 }
 
-test('login, protected account, and logout flow', async ({ page }) => {
+function buildCorsHeaders(origin: string) {
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-credentials': 'true',
+    'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+    'access-control-allow-headers': 'content-type',
+    'content-type': 'application/json',
+  };
+}
+
+test('login and logout flow through header account popover', async ({ page }) => {
   let loginRememberMeValue: boolean | undefined;
 
   await page.route('**/auth/**', async (route) => {
     const url = route.request().url();
     const method = route.request().method();
     const origin = route.request().headers().origin ?? 'http://127.0.0.1:3000';
-
-    const corsHeaders = {
-      'access-control-allow-origin': origin,
-      'access-control-allow-credentials': 'true',
-      'access-control-allow-methods': 'GET,POST,OPTIONS',
-      'access-control-allow-headers': 'content-type',
-      'content-type': 'application/json',
-    };
+    const corsHeaders = buildCorsHeaders(origin);
 
     if (method === 'OPTIONS') {
       await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
@@ -76,6 +79,83 @@ test('login, protected account, and logout flow', async ({ page }) => {
     });
   });
 
+  await page.route('**/cart**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.port !== '4000') {
+      await route.continue();
+      return;
+    }
+
+    const origin = request.headers().origin ?? 'http://127.0.0.1:3000';
+    const corsHeaders = buildCorsHeaders(origin);
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
+      return;
+    }
+
+    if (url.pathname.endsWith('/cart') && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          items: [],
+          summary: {
+            itemCount: 0,
+            validLineCount: 0,
+            subtotalCents: 0,
+            currency: 'USD',
+          },
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: { message: 'Not found.' } }),
+    });
+  });
+
+  await page.route('**/wishlist**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.port !== '4000') {
+      await route.continue();
+      return;
+    }
+
+    const origin = request.headers().origin ?? 'http://127.0.0.1:3000';
+    const corsHeaders = buildCorsHeaders(origin);
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
+      return;
+    }
+
+    if (url.pathname.endsWith('/wishlist') && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          items: [],
+          summary: {
+            itemCount: 0,
+          },
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: { message: 'Not found.' } }),
+    });
+  });
+
   await page.goto('/login');
   await waitForClientHydration(page);
   await page.getByLabel('Email').fill('customer@shoppilot.local');
@@ -83,9 +163,9 @@ test('login, protected account, and logout flow', async ({ page }) => {
   await page.getByRole('button', { name: 'Sign in' }).click();
   expect(loginRememberMeValue).toBe(false);
 
-  await expect(page).toHaveURL(/\/account$/, { timeout: 20_000 });
-  await expect(page.getByText('Signed in as')).toBeVisible();
+  await expect(page).toHaveURL(/\/catalog/, { timeout: 20_000 });
 
+  await page.getByRole('button', { name: 'Account menu' }).click();
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/login$/, { timeout: 20_000 });
 });
@@ -95,14 +175,7 @@ test('forgot and reset password flow', async ({ page }) => {
     const url = route.request().url();
     const method = route.request().method();
     const origin = route.request().headers().origin ?? 'http://127.0.0.1:3000';
-
-    const corsHeaders = {
-      'access-control-allow-origin': origin,
-      'access-control-allow-credentials': 'true',
-      'access-control-allow-methods': 'GET,POST,OPTIONS',
-      'access-control-allow-headers': 'content-type',
-      'content-type': 'application/json',
-    };
+    const corsHeaders = buildCorsHeaders(origin);
 
     if (method === 'OPTIONS') {
       await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
@@ -157,14 +230,7 @@ test('forgot password request stays on page after success', async ({ page }) => 
     const url = route.request().url();
     const method = route.request().method();
     const origin = route.request().headers().origin ?? 'http://127.0.0.1:3000';
-
-    const corsHeaders = {
-      'access-control-allow-origin': origin,
-      'access-control-allow-credentials': 'true',
-      'access-control-allow-methods': 'GET,POST,OPTIONS',
-      'access-control-allow-headers': 'content-type',
-      'content-type': 'application/json',
-    };
+    const corsHeaders = buildCorsHeaders(origin);
 
     if (method === 'OPTIONS') {
       await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
