@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import type {
   CartItemInvalidReason,
@@ -8,7 +8,11 @@ import type {
 import type {
   CheckoutBlockingReason,
   CheckoutCartSnapshot,
+  CheckoutPaymentStatus,
+  CheckoutPaymentStatusResponse,
+  CheckoutPricingBreakdown,
   CheckoutSessionResponse,
+  CreateCheckoutPaymentSessionResponse,
   SelectCheckoutAddressInput,
   UpdateCheckoutContactInput,
 } from '@shoppilot/db/checkout-contract';
@@ -17,6 +21,7 @@ import { evaluateCartLine, buildCartSummary } from '../cart/cart.policy.js';
 import type { AuthenticatedRequestUser } from '../auth/auth.types.js';
 import { parseEnv } from '../config/env.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { StripeCheckoutProvider } from './stripe-checkout.provider.js';
 
 const cartWithItemsInclude = {
   items: {
@@ -44,7 +49,10 @@ export class CheckoutService {
   private readonly logger = new Logger(CheckoutService.name);
   private readonly env = parseEnv(process.env);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(StripeCheckoutProvider) private readonly stripeCheckoutProvider: StripeCheckoutProvider,
+  ) {}
 
   async startSession(
     user: AuthenticatedRequestUser,
@@ -89,6 +97,7 @@ export class CheckoutService {
         activeSession.contactEmail,
         activeSession.contactPhone,
       );
+      const pricing = this.computePricing(cartSnapshot.summary, activeSession.selectedAddress?.country ?? null);
 
       const updated = await this.prisma.checkoutSession.update({
         where: {
@@ -99,6 +108,7 @@ export class CheckoutService {
           cartSnapshot: cartSnapshot as unknown as Prisma.InputJsonValue,
           blockingReasons: blockingReasons as unknown as Prisma.InputJsonValue,
           priceValidatedAt: now,
+          pricingSnapshotId: this.buildPricingFingerprint(user.id, activeSession.token, pricing),
         },
         include: checkoutSessionInclude,
       });
@@ -112,6 +122,7 @@ export class CheckoutService {
     const blockingReasons = this.resolveBlockingReasons(selectedAddressId, contactEmail, contactPhone);
 
     const expiresAt = new Date(now.getTime() + this.env.CHECKOUT_SESSION_TTL_MINUTES * 60_000);
+    const pricing = this.computePricing(cartSnapshot.summary, defaultAddress?.country ?? null);
 
     const created = await this.prisma.$transaction(async (transaction) => {
       await transaction.checkoutSession.updateMany({
@@ -136,6 +147,7 @@ export class CheckoutService {
           cartSnapshot: cartSnapshot as unknown as Prisma.InputJsonValue,
           blockingReasons: blockingReasons as unknown as Prisma.InputJsonValue,
           priceValidatedAt: now,
+          pricingSnapshotId: this.buildPricingFingerprint(user.id, 'pending', pricing),
           expiresAt,
           isActive: true,
         },
@@ -143,8 +155,16 @@ export class CheckoutService {
       });
     });
 
+    await this.prisma.checkoutSession.update({
+      where: { id: created.id },
+      data: {
+        pricingSnapshotId: this.buildPricingFingerprint(user.id, created.token, pricing),
+      },
+    });
+
     this.logSessionEvent('checkout.session.create', user.id, requestId, blockingReasons);
-    return this.mapSessionResponse(created);
+    const refreshed = await this.findSessionOrThrow(created.token, user.id);
+    return this.mapSessionResponse(refreshed);
   }
 
   async getSession(
@@ -275,6 +295,141 @@ export class CheckoutService {
     return this.mapSessionResponse(updated);
   }
 
+  async createPaymentSession(
+    user: AuthenticatedRequestUser,
+    token: string,
+    requestId?: string,
+  ): Promise<CreateCheckoutPaymentSessionResponse> {
+    const session = await this.findSessionOrThrow(token, user.id);
+    this.assertSessionIsActive(session);
+
+    const blockingReasons = this.resolveBlockingReasons(
+      session.selectedAddressId,
+      session.contactEmail,
+      session.contactPhone,
+    );
+
+    if (blockingReasons.length > 0) {
+      throw new HttpException(
+        {
+          code: 'CHECKOUT_NOT_READY',
+          message: 'Complete required checkout details before payment.',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const snapshot = session.cartSnapshot as CheckoutCartSnapshot;
+    const pricing = this.computePricing(snapshot.summary, session.selectedAddress?.country ?? null);
+    const pricingFingerprint = this.buildPricingFingerprint(user.id, session.token, pricing);
+
+    if (session.paymentProviderSessionId) {
+      const existingProviderSession = await this.stripeCheckoutProvider.retrieveSession(
+        session.paymentProviderSessionId,
+      );
+      if (existingProviderSession.url && existingProviderSession.status === 'open') {
+        return {
+          sessionToken: session.token,
+          provider: 'stripe',
+          providerSessionId: existingProviderSession.id,
+          checkoutUrl: existingProviderSession.url,
+        };
+      }
+    }
+
+    const successUrl =
+      this.env.STRIPE_WEB_SUCCESS_URL
+      ?? `${this.env.WEB_ORIGIN}/checkout/payment-return?sessionToken=${encodeURIComponent(session.token)}&providerSessionId={CHECKOUT_SESSION_ID}`;
+    const cancelUrl =
+      this.env.STRIPE_WEB_CANCEL_URL
+      ?? `${this.env.WEB_ORIGIN}/checkout/payment-return?sessionToken=${encodeURIComponent(session.token)}&providerSessionId={CHECKOUT_SESSION_ID}&status=canceled`;
+
+    const providerSession = await this.stripeCheckoutProvider.createHostedSession({
+      sessionToken: session.token,
+      userId: user.id,
+      customerEmail: session.contactEmail,
+      subtotalCents: pricing.subtotalCents,
+      shippingCents: pricing.shippingCents,
+      taxCents: pricing.taxCents,
+      successUrl,
+      cancelUrl,
+      idempotencyKey: `${session.token}:${pricingFingerprint}:${user.id}`,
+    });
+
+    await this.prisma.checkoutSession.update({
+      where: { id: session.id },
+      data: {
+        paymentProviderSessionId: providerSession.id,
+        pricingSnapshotId: pricingFingerprint,
+      },
+    });
+
+    this.logger.log({
+      event: 'checkout.session.create-payment',
+      userId: user.id,
+      requestId: requestId ?? 'unknown-request-id',
+      outcome: 'success',
+      provider: 'stripe',
+      providerSessionId: providerSession.id,
+    });
+
+    if (!providerSession.url) {
+      throw new HttpException(
+        {
+          code: 'CHECKOUT_PAYMENT_SESSION_UNAVAILABLE',
+          message: 'Hosted payment page unavailable. Retry in a moment.',
+        },
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    return {
+      sessionToken: session.token,
+      provider: 'stripe',
+      providerSessionId: providerSession.id,
+      checkoutUrl: providerSession.url,
+    };
+  }
+
+  async getPaymentStatus(
+    user: AuthenticatedRequestUser,
+    token: string,
+    providerSessionId: string,
+    requestId?: string,
+  ): Promise<CheckoutPaymentStatusResponse> {
+    const session = await this.findSessionOrThrow(token, user.id);
+    this.assertSessionIsActive(session);
+
+    if (!session.paymentProviderSessionId || session.paymentProviderSessionId !== providerSessionId) {
+      throw new HttpException(
+        {
+          code: 'CHECKOUT_PAYMENT_SESSION_NOT_FOUND',
+          message: 'Payment session not found for this checkout.',
+        },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const providerSession = await this.stripeCheckoutProvider.retrieveSession(providerSessionId);
+    const status = this.mapStripeStatus(providerSession.status, providerSession.payment_status);
+
+    this.logger.log({
+      event: 'checkout.session.payment-status',
+      userId: user.id,
+      requestId: requestId ?? 'unknown-request-id',
+      provider: 'stripe',
+      providerSessionId,
+      outcome: status,
+    });
+
+    return {
+      sessionToken: session.token,
+      provider: 'stripe',
+      providerSessionId,
+      status,
+    };
+  }
+
   private resolveBlockingReasons(
     selectedAddressId: string | null,
     contactEmail: string | null,
@@ -374,7 +529,6 @@ export class CheckoutService {
         secondaryImageUrl: item.product.secondaryImageUrl,
         isValid: lineState.isValid,
         invalidReason: lineState.invalidReason,
-        // future: shipping-tax-totals - attach computed totals in subphase 2.2
         lineSubtotalCents: lineState.lineSubtotalCents,
       };
     });
@@ -393,6 +547,7 @@ export class CheckoutService {
       : [];
 
     const snapshot = session.cartSnapshot as CheckoutCartSnapshot;
+    const pricing = this.computePricing(snapshot.summary, session.selectedAddress?.country ?? null);
 
     return {
       sessionToken: session.token,
@@ -404,10 +559,77 @@ export class CheckoutService {
         email: session.contactEmail,
         phone: session.contactPhone,
       },
-      // future: payment-hosted-checkout - attach provider session reference in subphase 2.2
       cartSnapshot: snapshot,
       priceValidatedAt: session.priceValidatedAt.toISOString(),
+      pricing,
     };
+  }
+
+  private computePricing(summary: CartSummary, country: string | null): CheckoutPricingBreakdown {
+    const subtotalCents = summary.subtotalCents;
+    const shippingCents = subtotalCents > 0 ? this.env.CHECKOUT_SHIPPING_CENTS : 0;
+    const taxRate = this.resolveTaxRate(country);
+    const taxableCents = subtotalCents + shippingCents;
+    const taxCents = Math.round(taxableCents * taxRate);
+    const totalCents = subtotalCents + shippingCents + taxCents;
+
+    return {
+      currency: summary.currency,
+      subtotalCents,
+      shippingCents,
+      taxRate,
+      taxCents,
+      totalCents,
+    };
+  }
+
+  private resolveTaxRate(country: string | null): number {
+    const normalizedCountry = (country ?? '').trim().toUpperCase();
+
+    if (normalizedCountry === 'US' || normalizedCountry === 'USA') {
+      return this.env.CHECKOUT_TAX_RATE_US;
+    }
+
+    if (normalizedCountry === 'CA' || normalizedCountry === 'CAN' || normalizedCountry === 'CANADA') {
+      return this.env.CHECKOUT_TAX_RATE_CA;
+    }
+
+    return this.env.CHECKOUT_TAX_RATE_DEFAULT;
+  }
+
+  private buildPricingFingerprint(
+    userId: string,
+    token: string,
+    pricing: CheckoutPricingBreakdown,
+  ): string {
+    return createHash('sha256')
+      .update(
+        `${userId}:${token}:${pricing.subtotalCents}:${pricing.shippingCents}:${pricing.taxCents}:${pricing.totalCents}`,
+      )
+      .digest('hex');
+  }
+
+  private mapStripeStatus(
+    status: string | null,
+    paymentStatus: string | null,
+  ): CheckoutPaymentStatus {
+    if (status === 'expired') {
+      return 'expired';
+    }
+
+    if (status === 'complete' && paymentStatus === 'paid') {
+      return 'paid';
+    }
+
+    if (status === 'complete' && paymentStatus === 'unpaid') {
+      return 'failed';
+    }
+
+    if (status === 'open') {
+      return 'open';
+    }
+
+    return 'pending';
   }
 
   private async findSessionOrThrow(token: string, userId: string): Promise<CheckoutSessionWithAddress> {

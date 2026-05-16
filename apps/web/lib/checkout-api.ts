@@ -1,5 +1,7 @@
 import type {
+  CheckoutPaymentStatusResponse,
   CheckoutSessionResponse,
+  CreateCheckoutPaymentSessionResponse,
   SelectCheckoutAddressInput,
   UpdateCheckoutContactInput,
 } from '@shoppilot/db/checkout-contract';
@@ -85,6 +87,14 @@ export function getCheckoutErrorMessage(message: string, code?: string): string 
     return 'Please provide valid checkout input.';
   }
 
+  if (code === 'CHECKOUT_NOT_READY') {
+    return 'Please complete address and contact details before payment.';
+  }
+
+  if (code === 'CHECKOUT_PAYMENT_SESSION_UNAVAILABLE') {
+    return 'Payment is temporarily unavailable. Please retry.';
+  }
+
   return message;
 }
 
@@ -130,4 +140,25 @@ export async function setCheckoutSessionContact(token: string, input: UpdateChec
   });
 
   return parseResponse<CheckoutSessionResponse>(response);
+}
+
+export async function createCheckoutPaymentSession(token: string) {
+  const response = await fetch(`${getApiBase()}/checkout/session/${token}/payment`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+
+  return parseResponse<CreateCheckoutPaymentSessionResponse>(response);
+}
+
+export async function fetchCheckoutPaymentStatus(token: string, providerSessionId: string) {
+  const response = await fetch(
+    `${getApiBase()}/checkout/session/${token}/payment-status?providerSessionId=${encodeURIComponent(providerSessionId)}`,
+    {
+      credentials: 'include',
+      cache: 'no-store',
+    },
+  );
+
+  return parseResponse<CheckoutPaymentStatusResponse>(response);
 }

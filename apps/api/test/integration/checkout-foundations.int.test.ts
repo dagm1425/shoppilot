@@ -65,11 +65,55 @@ type MockCheckoutSession = {
   cartSnapshot: unknown;
   blockingReasons: unknown;
   priceValidatedAt: Date;
+  pricingSnapshotId: string | null;
+  paymentProviderSessionId: string | null;
   expiresAt: Date;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
+
+type MockStripeSession = {
+  id: string;
+  status: 'open' | 'complete' | 'expired';
+  payment_status: 'paid' | 'unpaid' | 'no_payment_required';
+  url: string;
+};
+
+class InMemoryStripeCheckoutProvider {
+  readonly createdInputs: Array<Record<string, unknown>> = [];
+  private sessions = new Map<string, MockStripeSession>();
+
+  reset() {
+    this.createdInputs.length = 0;
+    this.sessions.clear();
+  }
+
+  seedSession(session: MockStripeSession) {
+    this.sessions.set(session.id, session);
+  }
+
+  async createHostedSession(input: Record<string, unknown>) {
+    this.createdInputs.push(input);
+    const id = `cs_test_${this.createdInputs.length}`;
+    const created: MockStripeSession = {
+      id,
+      status: 'open',
+      payment_status: 'unpaid',
+      url: `https://checkout.stripe.test/pay/${id}`,
+    };
+    this.sessions.set(id, created);
+    return created;
+  }
+
+  async retrieveSession(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Stripe session not found: ${sessionId}`);
+    }
+    return session;
+  }
+}
 
 class InMemoryCheckoutPrisma {
   private idCounter = 0;
@@ -427,6 +471,8 @@ class InMemoryCheckoutPrisma {
       const created: MockCheckoutSession = {
         id: this.nextId('session'),
         ...args.data,
+        pricingSnapshotId: args.data.pricingSnapshotId ?? null,
+        paymentProviderSessionId: args.data.paymentProviderSessionId ?? null,
         createdAt: now,
         updatedAt: now,
       };
@@ -459,6 +505,7 @@ class InMemoryCheckoutPrisma {
 
 describe('Checkout foundations (integration)', () => {
   const prismaMock = new InMemoryCheckoutPrisma();
+  const stripeMock = new InMemoryStripeCheckoutProvider();
 
   let app: INestApplication;
   let baseUrl = '';
@@ -466,8 +513,10 @@ describe('Checkout foundations (integration)', () => {
 
   beforeAll(async () => {
     prismaMock.reset();
+    stripeMock.reset();
     app = await createTestApp({
       prismaService: prismaMock as never,
+      stripeCheckoutProvider: stripeMock as never,
     });
 
     jwtService = app.get(JwtService);
@@ -484,6 +533,7 @@ describe('Checkout foundations (integration)', () => {
 
   beforeEach(() => {
     prismaMock.reset();
+    stripeMock.reset();
   });
 
   afterAll(async () => {
@@ -645,5 +695,205 @@ describe('Checkout foundations (integration)', () => {
     expect(expiredRead.status).toBe(410);
     const expiredPayload = (await expiredRead.json()) as { error: { code: string } };
     expect(expiredPayload.error.code).toBe('CHECKOUT_SESSION_EXPIRED');
+  });
+
+  it('returns pricing breakdown with ET default tax and fixed shipping', async () => {
+    const cookie = await getAuthCookie('checkout@shoppilot.local');
+
+    await fetch(`${baseUrl}/me/addresses`, {
+      method: 'POST',
+      headers: {
+        cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        recipientName: 'Tax Default',
+        country: 'ET',
+        city: 'Addis',
+        postalCode: '2000',
+        line1: 'Bole',
+        phone: '0900000000',
+        isDefault: true,
+      }),
+    });
+
+    const response = await fetch(`${baseUrl}/checkout/session`, {
+      method: 'POST',
+      headers: { cookie },
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      pricing: {
+        subtotalCents: number;
+        shippingCents: number;
+        taxRate: number;
+        taxCents: number;
+        totalCents: number;
+      };
+    };
+
+    expect(payload.pricing.subtotalCents).toBe(5200);
+    expect(payload.pricing.shippingCents).toBe(500);
+    expect(payload.pricing.taxRate).toBeCloseTo(0.0425, 4);
+    expect(payload.pricing.taxCents).toBe(242);
+    expect(payload.pricing.totalCents).toBe(5942);
+  });
+
+  it('creates payment session for ready checkout and reuses open provider session on retry', async () => {
+    const cookie = await getAuthCookie('checkout@shoppilot.local');
+
+    const addressCreate = await fetch(`${baseUrl}/me/addresses`, {
+      method: 'POST',
+      headers: {
+        cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        recipientName: 'Ready User',
+        country: 'US',
+        city: 'Austin',
+        postalCode: '73301',
+        line1: 'Congress Ave',
+        phone: '0900000000',
+        isDefault: true,
+      }),
+    });
+    const addressPayload = (await addressCreate.json()) as { addressId: string };
+
+    const sessionStart = await fetch(`${baseUrl}/checkout/session`, {
+      method: 'POST',
+      headers: { cookie },
+    });
+    const startPayload = (await sessionStart.json()) as { sessionToken: string };
+
+    await fetch(`${baseUrl}/checkout/session/${startPayload.sessionToken}/address`, {
+      method: 'PATCH',
+      headers: {
+        cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ addressId: addressPayload.addressId }),
+    });
+
+    await fetch(`${baseUrl}/checkout/session/${startPayload.sessionToken}/contact`, {
+      method: 'PATCH',
+      headers: {
+        cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: 'checkout@shoppilot.local',
+        phone: '0900000000',
+      }),
+    });
+
+    const createPayment = await fetch(
+      `${baseUrl}/checkout/session/${startPayload.sessionToken}/payment`,
+      {
+        method: 'POST',
+        headers: { cookie },
+      },
+    );
+
+    expect(createPayment.status).toBe(200);
+    const paymentPayload = (await createPayment.json()) as {
+      provider: string;
+      providerSessionId: string;
+      checkoutUrl: string;
+    };
+    expect(paymentPayload.provider).toBe('stripe');
+    expect(paymentPayload.providerSessionId).toContain('cs_test_');
+    expect(paymentPayload.checkoutUrl).toContain('checkout.stripe.test');
+    expect(stripeMock.createdInputs).toHaveLength(1);
+
+    const retryPayment = await fetch(
+      `${baseUrl}/checkout/session/${startPayload.sessionToken}/payment`,
+      {
+        method: 'POST',
+        headers: { cookie },
+      },
+    );
+    const retryPayload = (await retryPayment.json()) as { providerSessionId: string };
+    expect(retryPayment.status).toBe(200);
+    expect(retryPayload.providerSessionId).toBe(paymentPayload.providerSessionId);
+    expect(stripeMock.createdInputs).toHaveLength(1);
+  });
+
+  it('maps Stripe payment status to normalized checkout payment status', async () => {
+    const cookie = await getAuthCookie('checkout@shoppilot.local');
+
+    const addressCreate = await fetch(`${baseUrl}/me/addresses`, {
+      method: 'POST',
+      headers: {
+        cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        recipientName: 'Status User',
+        country: 'CA',
+        city: 'Toronto',
+        postalCode: 'M5V',
+        line1: 'King St',
+        phone: '0900000000',
+        isDefault: true,
+      }),
+    });
+    const addressPayload = (await addressCreate.json()) as { addressId: string };
+
+    const sessionStart = await fetch(`${baseUrl}/checkout/session`, {
+      method: 'POST',
+      headers: { cookie },
+    });
+    const startPayload = (await sessionStart.json()) as { sessionToken: string };
+
+    await fetch(`${baseUrl}/checkout/session/${startPayload.sessionToken}/address`, {
+      method: 'PATCH',
+      headers: {
+        cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ addressId: addressPayload.addressId }),
+    });
+
+    await fetch(`${baseUrl}/checkout/session/${startPayload.sessionToken}/contact`, {
+      method: 'PATCH',
+      headers: {
+        cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: 'checkout@shoppilot.local',
+        phone: '0900000000',
+      }),
+    });
+
+    const createPayment = await fetch(
+      `${baseUrl}/checkout/session/${startPayload.sessionToken}/payment`,
+      {
+        method: 'POST',
+        headers: { cookie },
+      },
+    );
+    const paymentPayload = (await createPayment.json()) as { providerSessionId: string };
+
+    stripeMock.seedSession({
+      id: paymentPayload.providerSessionId,
+      status: 'complete',
+      payment_status: 'paid',
+      url: `https://checkout.stripe.test/pay/${paymentPayload.providerSessionId}`,
+    });
+
+    const statusResponse = await fetch(
+      `${baseUrl}/checkout/session/${startPayload.sessionToken}/payment-status?providerSessionId=${paymentPayload.providerSessionId}`,
+      {
+        method: 'GET',
+        headers: { cookie },
+      },
+    );
+
+    expect(statusResponse.status).toBe(200);
+    const statusPayload = (await statusResponse.json()) as { status: string };
+    expect(statusPayload.status).toBe('paid');
   });
 });

@@ -17,6 +17,7 @@ describe('auth cookie and expiry helpers', () => {
       AUTH_RESET_RATE_LIMIT_MAX: '5',
       AUTH_RESET_RATE_LIMIT_WINDOW_MINUTES: '30',
       AUTH_RESET_TOKEN_TTL_MINUTES: '30',
+      STRIPE_SECRET_KEY: 'sk_test_dummy',
       RESEND_API_KEY: 're_test_dummy_api_key',
     });
 
@@ -44,6 +45,7 @@ describe('auth cookie and expiry helpers', () => {
       AUTH_RESET_RATE_LIMIT_MAX: '5',
       AUTH_RESET_RATE_LIMIT_WINDOW_MINUTES: '30',
       AUTH_RESET_TOKEN_TTL_MINUTES: '30',
+      STRIPE_SECRET_KEY: 'sk_test_dummy',
       RESEND_API_KEY: 're_test_dummy_api_key',
     });
 

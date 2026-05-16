@@ -7,6 +7,7 @@ describe('parseEnv', () => {
       API_PORT: '4000',
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shoppilot',
       SENTRY_ENABLED: 'false',
+      STRIPE_SECRET_KEY: 'sk_test_dummy',
       RESEND_API_KEY: 're_test_dummy_api_key',
     });
 
@@ -21,6 +22,7 @@ describe('parseEnv', () => {
         NODE_ENV: 'development',
         API_PORT: '4000',
         SENTRY_ENABLED: 'false',
+        STRIPE_SECRET_KEY: 'sk_test_dummy',
       }),
     ).toThrow();
   });
@@ -32,6 +34,7 @@ describe('parseEnv', () => {
         API_PORT: '4000',
         DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shoppilot',
         SENTRY_ENABLED: 'true',
+        STRIPE_SECRET_KEY: 'sk_test_dummy',
         RESEND_API_KEY: 're_test_dummy_api_key',
       }),
     ).toThrow();
@@ -47,6 +50,7 @@ describe('parseEnv', () => {
       SENTRY_SAMPLE_RATE: '1',
       SENTRY_TRACES_SAMPLE_RATE: '0.05',
       SENTRY_PROFILES_SAMPLE_RATE: '0.1',
+      STRIPE_SECRET_KEY: 'sk_test_dummy',
       RESEND_API_KEY: 're_test_dummy_api_key',
     });
 
@@ -63,6 +67,7 @@ describe('parseEnv', () => {
         API_PORT: '4000',
         DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shoppilot',
         SENTRY_ENABLED: 'false',
+        STRIPE_SECRET_KEY: 'sk_test_dummy',
       }),
     ).toThrow();
   });
@@ -74,6 +79,7 @@ describe('parseEnv', () => {
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shoppilot',
       SENTRY_ENABLED: 'false',
       EMAIL_FROM_ADDRESS: 'onboarding@resend.dev',
+      STRIPE_SECRET_KEY: 'sk_test_dummy',
       RESEND_API_KEY: 're_test_dummy_api_key',
     });
   });

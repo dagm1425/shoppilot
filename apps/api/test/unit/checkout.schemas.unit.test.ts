@@ -1,5 +1,6 @@
 import { HttpException } from '@nestjs/common';
 import {
+  parseCheckoutProviderSessionIdOrThrow,
   parseCheckoutSessionTokenOrThrow,
   parseSelectCheckoutAddressInputOrThrow,
   parseUpdateCheckoutContactInputOrThrow,
@@ -8,6 +9,7 @@ import {
 describe('checkout schemas', () => {
   it('parses valid token and address selection payload', () => {
     expect(parseCheckoutSessionTokenOrThrow(' token_123 ')).toBe('token_123');
+    expect(parseCheckoutProviderSessionIdOrThrow(' cs_test_123 ')).toBe('cs_test_123');
 
     expect(parseSelectCheckoutAddressInputOrThrow({ addressId: ' addr_1 ' })).toEqual({
       addressId: 'addr_1',
@@ -33,5 +35,9 @@ describe('checkout schemas', () => {
         phone: 'bad',
       }),
     ).toThrow(HttpException);
+  });
+
+  it('rejects missing provider session id query input', () => {
+    expect(() => parseCheckoutProviderSessionIdOrThrow(undefined)).toThrow(HttpException);
   });
 });

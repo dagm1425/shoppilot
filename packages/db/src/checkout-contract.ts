@@ -30,6 +30,32 @@ export type CheckoutSessionResponse = {
   contact: CheckoutSessionContact;
   cartSnapshot: CheckoutCartSnapshot;
   priceValidatedAt: string;
+  pricing: CheckoutPricingBreakdown;
+};
+
+export type CheckoutPricingBreakdown = {
+  currency: string;
+  subtotalCents: number;
+  shippingCents: number;
+  taxRate: number;
+  taxCents: number;
+  totalCents: number;
+};
+
+export type CreateCheckoutPaymentSessionResponse = {
+  sessionToken: string;
+  provider: 'stripe';
+  providerSessionId: string;
+  checkoutUrl: string;
+};
+
+export type CheckoutPaymentStatus = 'pending' | 'open' | 'paid' | 'failed' | 'expired' | 'canceled';
+
+export type CheckoutPaymentStatusResponse = {
+  sessionToken: string;
+  provider: 'stripe';
+  providerSessionId: string | null;
+  status: CheckoutPaymentStatus;
 };
 
 export type SelectCheckoutAddressInput = {

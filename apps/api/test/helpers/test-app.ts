@@ -6,10 +6,12 @@ import { PasswordResetMailerService } from '../../src/auth/password-reset-mailer
 import { ApiErrorFilter } from '../../src/common/api-error.filter.js';
 import { requestContextMiddleware } from '../../src/common/request-context.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { StripeCheckoutProvider } from '../../src/checkout/stripe-checkout.provider.js';
 
 export async function createTestApp(options?: {
   prismaService?: Partial<PrismaService>;
   passwordResetMailerService?: Partial<PasswordResetMailerService>;
+  stripeCheckoutProvider?: Partial<StripeCheckoutProvider>;
 }): Promise<INestApplication> {
   const builder = Test.createTestingModule({
     imports: [AppModule],
@@ -23,6 +25,12 @@ export async function createTestApp(options?: {
     builder
       .overrideProvider(PasswordResetMailerService)
       .useValue(options.passwordResetMailerService);
+  }
+
+  if (options?.stripeCheckoutProvider) {
+    builder
+      .overrideProvider(StripeCheckoutProvider)
+      .useValue(options.stripeCheckoutProvider);
   }
 
   const testingModule = await builder.compile();

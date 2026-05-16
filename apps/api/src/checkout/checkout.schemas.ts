@@ -71,3 +71,10 @@ export function parseSelectCheckoutAddressInputOrThrow(input: unknown): SelectCh
 export function parseUpdateCheckoutContactInputOrThrow(input: unknown): UpdateCheckoutContactInput {
   return parseOrThrow(updateContactSchema, input);
 }
+
+export function parseCheckoutProviderSessionIdOrThrow(input: unknown): string {
+  return parseOrThrow(
+    z.preprocess((value) => getSingleValue(value), z.string().trim().min(1).max(255)),
+    input,
+  );
+}

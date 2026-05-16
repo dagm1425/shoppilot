@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { AuthenticatedRequestUser } from '../auth/auth.types.js';
 import type { RequestWithContext } from '../common/request-context.js';
 import {
+  parseCheckoutProviderSessionIdOrThrow,
   parseCheckoutSessionTokenOrThrow,
   parseSelectCheckoutAddressInputOrThrow,
   parseUpdateCheckoutContactInputOrThrow,
@@ -99,6 +100,53 @@ export class CheckoutController {
         op: 'http.server',
       },
       async () => this.checkoutService.updateContact(user, parsedToken, input, request.requestId),
+    );
+  }
+
+  @Post('session/:token/payment')
+  @HttpCode(200)
+  async createPaymentSession(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Param('token') token: string,
+    @Req() request: RequestWithContext,
+  ) {
+    const parsedToken = parseCheckoutSessionTokenOrThrow(token);
+    Sentry.setTag('checkout.operation', 'create-payment-session');
+
+    return Sentry.startSpan(
+      {
+        name: 'checkout.session.create-payment',
+        op: 'http.server',
+      },
+      async () =>
+        this.checkoutService.createPaymentSession(user, parsedToken, request.requestId),
+    );
+  }
+
+  @Get('session/:token/payment-status')
+  async getPaymentStatus(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Param('token') token: string,
+    @Req() request: RequestWithContext,
+  ) {
+    const parsedToken = parseCheckoutSessionTokenOrThrow(token);
+    const providerSessionId = parseCheckoutProviderSessionIdOrThrow(
+      request.query.providerSessionId,
+    );
+    Sentry.setTag('checkout.operation', 'get-payment-status');
+
+    return Sentry.startSpan(
+      {
+        name: 'checkout.session.get-payment-status',
+        op: 'http.server',
+      },
+      async () =>
+        this.checkoutService.getPaymentStatus(
+          user,
+          parsedToken,
+          providerSessionId,
+          request.requestId,
+        ),
     );
   }
 }

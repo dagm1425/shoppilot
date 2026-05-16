@@ -83,6 +83,11 @@ Use this file to track high-value tests by phase, evidence, and latest result st
 | P2-2.1-T005 | Checkout Session Expiry | P1 | INT | Expired checkout sessions return explicit `CHECKOUT_SESSION_EXPIRED` response and block stale token reuse. | `apps/api/test/integration/checkout-foundations.int.test.ts` | Yes | Passing | 2026-05-16 |
 | P2-2.1-T006 | Checkout UI Readiness Flow | P0 | E2E | `/checkout` keeps Continue disabled until address/contact requirements are saved, then enables continuation state. | `apps/web/test/e2e/checkout.e2e.test.ts` | Yes | Passing | 2026-05-16 |
 | P2-2.1-T007 | Checkout Responsive Coverage | P0 | E2E | Checkout page remains usable with no horizontal overflow across required viewport matrix. | `apps/web/test/e2e/checkout.e2e.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.2-T001 | Checkout Query Validation | P0 | UNIT | Checkout schema validator enforces non-empty provider session id for payment-status query input. | `apps/api/test/unit/checkout.schemas.unit.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.2-T002 | Pricing Breakdown API | P0 | INT | Checkout session returns deterministic pricing (`subtotal`, fixed shipping, default ET tax rate, tax cents, total cents). | `apps/api/test/integration/checkout-foundations.int.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.2-T003 | Hosted Payment Session Reuse | P0 | INT | Payment session creation for ready checkout is idempotent and reuses existing open Stripe session on retry. | `apps/api/test/integration/checkout-foundations.int.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.2-T004 | Payment Status Mapping | P1 | INT | Payment-status endpoint maps Stripe provider states to normalized checkout payment status payload. | `apps/api/test/integration/checkout-foundations.int.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.2-T005 | Payment Return UX | P0 | E2E | `/checkout/payment-return` shows completion state when provider status resolves to `paid`. | `apps/web/test/e2e/checkout.e2e.test.ts` | Yes | Passing | 2026-05-16 |
 
 ### Phase: Admin, Webhooks Expansion, and Async Jobs
 

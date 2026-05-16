@@ -19,6 +19,8 @@ type CheckoutState = {
   selectedAddressId: string | null;
   contact: { email: string | null; phone: string | null };
   addresses: Address[];
+  providerSessionId: string;
+  paymentStatus: 'pending' | 'open' | 'paid' | 'failed' | 'expired' | 'canceled';
 };
 
 function buildCorsHeaders(origin: string) {
@@ -90,6 +92,14 @@ function buildCheckoutSessionResponse(state: CheckoutState) {
       },
     },
     priceValidatedAt: new Date().toISOString(),
+    pricing: {
+      currency: 'USD',
+      subtotalCents: 5200,
+      shippingCents: 500,
+      taxRate: 0.0425,
+      taxCents: 242,
+      totalCents: 5942,
+    },
   };
 }
 
@@ -99,6 +109,8 @@ async function mockCheckoutApis(page: Page) {
     selectedAddressId: null,
     contact: { email: 'checkout@shoppilot.local', phone: null },
     addresses: [],
+    providerSessionId: 'cs_test_1',
+    paymentStatus: 'open',
   };
 
   await page.route('**/*', async (route) => {
@@ -156,15 +168,6 @@ async function mockCheckoutApis(page: Page) {
     }
 
     if (url.pathname.endsWith('/checkout/session') && request.method() === 'POST') {
-      await route.fulfill({
-        status: 200,
-        headers: corsHeaders,
-        body: JSON.stringify(buildCheckoutSessionResponse(state)),
-      });
-      return;
-    }
-
-    if (url.pathname.includes('/checkout/session/') && request.method() === 'GET') {
       await route.fulfill({
         status: 200,
         headers: corsHeaders,
@@ -246,12 +249,51 @@ async function mockCheckoutApis(page: Page) {
       return;
     }
 
+    if (url.pathname.includes('/checkout/session/') && url.pathname.endsWith('/payment') && request.method() === 'POST') {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          sessionToken: state.token,
+          provider: 'stripe',
+          providerSessionId: state.providerSessionId,
+          checkoutUrl: `http://127.0.0.1:3000/checkout/payment-return?sessionToken=${state.token}&providerSessionId=${state.providerSessionId}`,
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname.includes('/checkout/session/') && url.pathname.endsWith('/payment-status') && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          sessionToken: state.token,
+          provider: 'stripe',
+          providerSessionId: state.providerSessionId,
+          status: state.paymentStatus,
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname.includes('/checkout/session/') && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify(buildCheckoutSessionResponse(state)),
+      });
+      return;
+    }
+
     await route.fulfill({
       status: 404,
       headers: corsHeaders,
       body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Not found.' } }),
     });
   });
+
+  return state;
 }
 
 test('checkout stays disabled until address and contact are completed', async ({ page }) => {
@@ -260,7 +302,7 @@ test('checkout stays disabled until address and contact are completed', async ({
   await page.goto('/checkout');
 
   await expect(page.getByRole('heading', { name: 'Checkout' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Pay now' })).toBeDisabled();
 
   await page.getByLabel('Recipient').fill('Dagmawi');
   await page.getByLabel('Country').fill('ET');
@@ -274,7 +316,7 @@ test('checkout stays disabled until address and contact are completed', async ({
   await page.getByLabel('Phone').nth(1).fill('0900000000');
   await page.getByRole('button', { name: 'Save contact' }).click();
 
-  await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Pay now' })).toBeEnabled();
 });
 
 test('checkout page remains usable with no horizontal overflow on required viewports', async ({ page }) => {
@@ -300,4 +342,11 @@ test('checkout page remains usable with no horizontal overflow on required viewp
 
     expect(hasOverflow).toBe(false);
   }
+});
+
+test('payment return page shows success state for paid payment status', async ({ page }) => {
+  const state = await mockCheckoutApis(page);
+  state.paymentStatus = 'paid';
+  await page.goto('/checkout/payment-return?sessionToken=checkout_token_1&providerSessionId=cs_test_1');
+  await expect(page.getByRole('heading', { name: 'Payment complete' })).toBeVisible();
 });

@@ -17,6 +17,7 @@ import {
   updateAddress,
 } from '../../lib/address-api';
 import {
+  createCheckoutPaymentSession,
   fetchCheckoutSession,
   getCheckoutErrorMessage,
   setCheckoutSessionAddress,
@@ -439,6 +440,36 @@ export function CheckoutPageContent() {
     }
   }
 
+  async function handlePayNow() {
+    if (!session?.sessionToken) {
+      return;
+    }
+
+    setPendingAction('payment:start');
+    setInfoMessage('');
+
+    try {
+      const response = await createCheckoutPaymentSession(session.sessionToken);
+
+      if (!response.ok) {
+        if (isUnauthorized(response.status, response.code)) {
+          handleUnauthorized();
+          return;
+        }
+
+        setInfoMessage(getCheckoutErrorMessage(response.message, response.code));
+        return;
+      }
+
+      window.location.assign(response.data.checkoutUrl);
+    } catch (error) {
+      reportClientError({ error, context: 'checkout:start-payment' });
+      setInfoMessage('Could not start payment right now. Please retry.');
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   if (status === 'loading') {
     return (
       <StatePanel
@@ -811,23 +842,15 @@ export function CheckoutPageContent() {
                 />
               </button>
             </div>
-            <div className="sm:col-span-2 mt-2 flex items-center justify-between gap-3 border-t border-border pt-4 text-sm">
-              <span className="text-muted-foreground">
-                {session.readinessStatus === 'ready'
-                  ? 'Ready for payment step'
-                  : 'Complete address and contact to continue'}
-              </span>
+            <div className="sm:col-span-2 mt-2 flex items-center justify-end gap-3 border-t border-border pt-4 text-sm">
               <button
                 type="button"
-                disabled={session.readinessStatus === 'blocked'}
-                onClick={() =>
-                  setInfoMessage(
-                    'Payment page integration is planned for Subphase 2.2 after this readiness checkpoint.',
-                  )
-                }
+                disabled={session.readinessStatus === 'blocked' || pendingAction === 'payment:start'}
+                onClick={handlePayNow}
                 className={`${checkoutPrimaryButtonClassName} min-w-[132px]`}
+                aria-busy={pendingAction === 'payment:start'}
               >
-                <ButtonLabel pending={false} text="Continue" />
+                <ButtonLabel pending={pendingAction === 'payment:start'} text="Pay now" />
               </button>
             </div>
           </form>
@@ -845,21 +868,23 @@ export function CheckoutPageContent() {
           </h2>
           <dl className="mt-3 space-y-2 text-sm">
             <div className="flex items-center justify-between gap-3 text-muted-foreground">
-              <dt>Items</dt>
-              <dd>{session.cartSnapshot.summary.itemCount}</dd>
+              <dt>Sub Total</dt>
+              <dd>{formatMoney(session.pricing.subtotalCents, session.pricing.currency)}</dd>
             </div>
             <div className="flex items-center justify-between gap-3 text-muted-foreground">
-              <dt>Valid lines</dt>
-              <dd>{session.cartSnapshot.summary.validLineCount}</dd>
+              <dt>Estimated Shipping</dt>
+              <dd>{formatMoney(session.pricing.shippingCents, session.pricing.currency)}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-3 text-muted-foreground">
+              <dt>
+                Estimated Tax
+                <span className="ml-1 text-xs">({(session.pricing.taxRate * 100).toFixed(2)}%)</span>
+              </dt>
+              <dd>{formatMoney(session.pricing.taxCents, session.pricing.currency)}</dd>
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-border pt-2 font-semibold text-foreground">
-              <dt>Sub Total</dt>
-              <dd>
-                {formatMoney(
-                  session.cartSnapshot.summary.subtotalCents,
-                  session.cartSnapshot.summary.currency,
-                )}
-              </dd>
+              <dt>Total</dt>
+              <dd>{formatMoney(session.pricing.totalCents, session.pricing.currency)}</dd>
             </div>
           </dl>
         </section>
