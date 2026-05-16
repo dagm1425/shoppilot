@@ -93,4 +93,12 @@ Use this file to track high-value tests by phase, evidence, and latest result st
 
 ### Phase: Vercel AI Assistant
 
+| ID | Category | Priority | Type | Description | Evidence (file refs) | Written | Result | Last Run |
+|---|---|---|---|---|---|---|---|---|
+| P4-4.1-T001 | AI Contracts | P0 | UNIT | Placeholder chat service returns deterministic typed `ChatResponse` fields without invoking model/search logic. | `apps/ai/tests/unit/test_chat_service_unit.py` | Yes | Passing | 2026-05-16 |
+| P4-4.1-T002 | AI Config Validation | P0 | UNIT | App settings enforce LangSmith requirements only when tracing is enabled and allow disabled tracing without optional keys. | `apps/ai/tests/unit/test_settings_unit.py` | Yes | Passing | 2026-05-16 |
+| P4-4.1-T003 | AI Health Endpoint | P0 | INT | `/health` and `/v1/health` return typed payload and include request-id response header. | `apps/ai/tests/integration/test_health_int.py` | Yes | Passing | 2026-05-16 |
+| P4-4.1-T004 | AI Chat Endpoint | P0 | INT | `/ai/chat` and `/v1/ai/chat` return typed placeholder response, preserve payload request ID, and echo inbound request-id header. | `apps/ai/tests/integration/test_chat_int.py` | Yes | Passing | 2026-05-16 |
+| P4-4.1-T005 | AI Validation Failure Contract | P0 | E2E | Invalid chat payload returns `422` typed `ErrorResponse` with deterministic `AI_VALIDATION_ERROR` and request-id propagation. | `apps/ai/tests/e2e/test_chat_e2e.py` | Yes | Passing | 2026-05-16 |
+
 ### Phase: Hardening, Performance, and Deployment
