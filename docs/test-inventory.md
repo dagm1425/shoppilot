@@ -74,6 +74,16 @@ Use this file to track high-value tests by phase, evidence, and latest result st
 
 ### Phase: Checkout and Orders
 
+| ID | Category | Priority | Type | Description | Evidence (file refs) | Written | Result | Last Run |
+|---|---|---|---|---|---|---|---|---|
+| P2-2.1-T001 | Address Validation | P0 | UNIT | Address schema parsing enforces ISO country, required fields, and update payload constraints. | `apps/api/test/unit/address.schemas.unit.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.1-T002 | Checkout Validation | P0 | UNIT | Checkout session token/contact/address payload validators reject malformed inputs and normalize valid payloads. | `apps/api/test/unit/checkout.schemas.unit.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.1-T003 | Checkout Foundation API | P0 | INT | Checkout session start/resume/readiness lifecycle with address + contact completion transitions blocked -> ready. | `apps/api/test/integration/checkout-foundations.int.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.1-T004 | Checkout Precondition Guard | P0 | INT | Session creation rejects empty carts with deterministic `CHECKOUT_CART_EMPTY` error contract. | `apps/api/test/integration/checkout-foundations.int.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.1-T005 | Checkout Session Expiry | P1 | INT | Expired checkout sessions return explicit `CHECKOUT_SESSION_EXPIRED` response and block stale token reuse. | `apps/api/test/integration/checkout-foundations.int.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.1-T006 | Checkout UI Readiness Flow | P0 | E2E | `/checkout` keeps Continue disabled until address/contact requirements are saved, then enables continuation state. | `apps/web/test/e2e/checkout.e2e.test.ts` | Yes | Passing | 2026-05-16 |
+| P2-2.1-T007 | Checkout Responsive Coverage | P0 | E2E | Checkout page remains usable with no horizontal overflow across required viewport matrix. | `apps/web/test/e2e/checkout.e2e.test.ts` | Yes | Passing | 2026-05-16 |
+
 ### Phase: Admin, Webhooks Expansion, and Async Jobs
 
 ### Phase: Vercel AI Assistant

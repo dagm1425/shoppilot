@@ -21,6 +21,14 @@
     "./wishlist-contract": {
       "types": "./dist/wishlist-contract.d.ts",
       "default": "./dist/wishlist-contract.js"
+    },
+    "./address-contract": {
+      "types": "./dist/address-contract.d.ts",
+      "default": "./dist/address-contract.js"
+    },
+    "./checkout-contract": {
+      "types": "./dist/checkout-contract.d.ts",
+      "default": "./dist/checkout-contract.js"
     }
   },
   "scripts": {

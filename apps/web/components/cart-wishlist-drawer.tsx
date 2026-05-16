@@ -2,7 +2,7 @@
 
 import type { CartLineItem as CartLineItemData } from '@shoppilot/db/cart-contract';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from '../lib/auth-store';
 import { addCartItem, removeCartItem, updateCartItem } from '../lib/cart-api';
 import { reportClientError } from '../lib/client-error';
@@ -14,7 +14,6 @@ import { CartWishlistEmptyCartState } from './cart-wishlist/cart-wishlist-empty-
 import { CartWishlistEmptyWishlistState } from './cart-wishlist/cart-wishlist-empty-wishlist-state';
 import { CartWishlistDrawerFooter } from './cart-wishlist/cart-wishlist-drawer-footer';
 import { CartWishlistDrawerHeader } from './cart-wishlist/cart-wishlist-drawer-header';
-import { formatDrawerMoney } from './cart-wishlist/cart-wishlist-drawer-utils';
 import { WishlistDrawerItemRow } from './cart-wishlist/wishlist-drawer-item-row';
 
 type DrawerTab = 'cart' | 'wishlist';
@@ -74,14 +73,6 @@ export function CartWishlistDrawer({ open, onClose, initialTab }: CartWishlistDr
       window.removeEventListener('keydown', handleEscape);
     };
   }, [onClose, open]);
-
-  const cartSubtotalLabel = useMemo(() => {
-    if (!cachedCart) {
-      return 'US$0';
-    }
-
-    return formatDrawerMoney(cachedCart.summary.subtotalCents, cachedCart.summary.currency);
-  }, [cachedCart]);
 
   function cartQuantityPending(itemId: string): boolean {
     return cartPendingActionKeys.includes(`qty:${itemId}`);
@@ -294,7 +285,11 @@ export function CartWishlistDrawer({ open, onClose, initialTab }: CartWishlistDr
         <div className="min-h-0 flex-1 overflow-y-auto">{activeTab === 'cart' ? renderCartContent() : renderWishlistContent()}</div>
 
         {activeTab === 'cart' && cachedCart && cachedCart.items.length > 0 ? (
-          <CartWishlistDrawerFooter subtotalLabel={cartSubtotalLabel} onClose={onClose} />
+          <CartWishlistDrawerFooter
+            subtotalCents={cachedCart.summary.subtotalCents}
+            currency={cachedCart.summary.currency}
+            onClose={onClose}
+          />
         ) : null}
       </aside>
     </div>

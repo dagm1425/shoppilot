@@ -17,6 +17,8 @@ model User {
   passwordResetKeys PasswordResetToken[]
   cart              Cart?
   wishlist          Wishlist?
+  addresses         Address[]
+  checkoutSessions  CheckoutSession[]
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
@@ -112,6 +114,7 @@ model Cart {
   userId    String     @unique
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   items     CartItem[]
+  checkoutSessions CheckoutSession[]
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -159,6 +162,56 @@ model WishlistItem {
   @@index([wishlistId], map: "wishlist_items_wishlist_id_idx")
   @@index([productId], map: "wishlist_items_product_id_idx")
   @@map("wishlist_items")
+}
+
+model Address {
+  id               String            @id @default(cuid())
+  userId           String
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipientName    String
+  country          String
+  city             String
+  postalCode       String
+  line1            String
+  line2            String?
+  phone            String?
+  isDefault        Boolean           @default(false)
+  checkoutSessions CheckoutSession[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([userId], map: "addresses_user_id_idx")
+  @@index([userId, isDefault], map: "addresses_user_id_is_default_idx")
+  @@map("addresses")
+}
+
+model CheckoutSession {
+  id                       String   @id @default(cuid())
+  token                    String   @unique
+  userId                   String
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cartId                   String
+  cart                     Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  selectedAddressId        String?
+  selectedAddress          Address? @relation(fields: [selectedAddressId], references: [id], onDelete: SetNull)
+  contactEmail             String?
+  contactPhone             String?
+  blockingReasons          Json
+  cartSnapshot             Json
+  priceValidatedAt         DateTime
+  pricingSnapshotId        String?
+  paymentProviderSessionId String?
+  expiresAt                DateTime
+  isActive                 Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  /// future: pricing-breakdown - attach subtotal/shipping/tax in subphase 2.2
+  /// future: provider-session-link - store Stripe checkout session id in subphase 2.2
+  @@index([userId, cartId, isActive], map: "checkout_sessions_user_id_cart_id_is_active_idx")
+  @@index([expiresAt], map: "checkout_sessions_expires_at_idx")
+  @@index([selectedAddressId], map: "checkout_sessions_selected_address_id_idx")
+  @@map("checkout_sessions")
 }
 
 enum Role {
