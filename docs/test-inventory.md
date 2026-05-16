@@ -69,6 +69,8 @@ Use this file to track high-value tests by phase, evidence, and latest result st
 | P1-1.4-T006 | Cart Happy Path UI Flow | P0 | E2E | User can add from catalog, open cart, update quantity, and remove line item with UI feedback. | `apps/web/test/e2e/cart.e2e.test.ts` | Yes | Passing | 2026-05-16 |
 | P1-1.4-T007 | Cart Failure/Recovery UI Flow | P0 | E2E | Stock-drop invalidation and unauthenticated cart-action redirect paths provide recoverable UX and expected redirects. | `apps/web/test/e2e/cart.e2e.test.ts` | Yes | Passing | 2026-05-16 |
 | P1-1.4-T008 | Wishlist Toggle + Auth Redirect | P1 | INT | Wishlist toggle posts add/remove mutations, syncs local wishlist state, and redirects unauthorized users to login. | `apps/web/test/integration/wishlist.int.test.tsx` | Yes | Passing | 2026-05-16 |
+| P1-1.4-T009 | Wishlist Validation Logic | P0 | UNIT | Wishlist payload schema validation accepts normalized product ids and rejects malformed identifiers/item ids. | `apps/api/test/unit/wishlist.schemas.unit.test.ts` | Yes | Passing | 2026-05-16 |
+| P1-1.4-T010 | Wishlist API Contract + Isolation | P0 | INT | Wishlist API covers read/add(unique)/remove(idempotent), malformed and not-found errors, auth boundary, and cross-user delete isolation. | `apps/api/test/integration/wishlist.int.test.ts` | Yes | Passing | 2026-05-16 |
 
 ### Phase: Checkout and Orders
 
