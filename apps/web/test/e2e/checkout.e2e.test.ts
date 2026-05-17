@@ -21,6 +21,7 @@ type CheckoutState = {
   addresses: Address[];
   providerSessionId: string;
   paymentStatus: 'pending' | 'open' | 'paid' | 'failed' | 'expired' | 'canceled';
+  orderNumber: string | null;
 };
 
 function buildCorsHeaders(origin: string) {
@@ -111,19 +112,36 @@ async function mockCheckoutApis(page: Page) {
     addresses: [],
     providerSessionId: 'cs_test_1',
     paymentStatus: 'open',
+    orderNumber: null,
   };
 
   await page.route('**/*', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
-    if (url.port !== '4000') {
+    const origin = request.headers().origin ?? 'http://127.0.0.1:3000';
+    const corsHeaders = buildCorsHeaders(origin);
+
+    const isCheckoutApiPath =
+      url.port === '4000'
+      && (
+      url.pathname.endsWith('/auth/me')
+      || url.pathname.endsWith('/cart')
+      || url.pathname.endsWith('/wishlist')
+      || url.pathname.endsWith('/checkout/session')
+      || url.pathname.endsWith('/me/addresses')
+      || (url.pathname.includes('/checkout/session/') && url.pathname.endsWith('/address'))
+      || (url.pathname.includes('/checkout/session/') && url.pathname.endsWith('/contact'))
+      || (url.pathname.includes('/checkout/session/') && url.pathname.endsWith('/payment'))
+      || (url.pathname.includes('/checkout/session/') && url.pathname.includes('/payment-status'))
+      || url.pathname.includes('/checkout/place-order')
+      || url.pathname.startsWith('/orders/')
+      );
+
+    if (!isCheckoutApiPath) {
       await route.continue();
       return;
     }
-
-    const origin = request.headers().origin ?? 'http://127.0.0.1:3000';
-    const corsHeaders = buildCorsHeaders(origin);
 
     if (request.method() === 'OPTIONS') {
       await route.fulfill({ status: 204, headers: corsHeaders, body: '' });
@@ -263,7 +281,7 @@ async function mockCheckoutApis(page: Page) {
       return;
     }
 
-    if (url.pathname.includes('/checkout/session/') && url.pathname.endsWith('/payment-status') && request.method() === 'GET') {
+    if (url.pathname.includes('/checkout/session/') && url.pathname.includes('/payment-status') && request.method() === 'GET') {
       await route.fulfill({
         status: 200,
         headers: corsHeaders,
@@ -272,6 +290,152 @@ async function mockCheckoutApis(page: Page) {
           provider: 'stripe',
           providerSessionId: state.providerSessionId,
           status: state.paymentStatus,
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname.includes('/checkout/place-order') && request.method() === 'POST') {
+      state.orderNumber = state.orderNumber ?? 'SP-20260517-AB12CD';
+
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          orderId: 'order_1',
+          orderNumber: state.orderNumber,
+          status: 'paid',
+          payment: {
+            provider: 'stripe',
+            providerSessionId: state.providerSessionId,
+          },
+          contact: {
+            email: 'checkout@shoppilot.local',
+            phone: '0900000000',
+          },
+          totals: {
+            currency: 'USD',
+            subtotalCents: 5200,
+            shippingCents: 500,
+            taxCents: 242,
+            totalCents: 5942,
+          },
+          shipping: {
+            recipientName: 'Dagmawi',
+            country: 'ET',
+            city: 'Addis Ababa',
+            postalCode: '2000',
+            line1: 'Yeka Sub-city',
+            line2: null,
+            phone: '0900000000',
+            methodName: 'Standard Shipping',
+            etaLabel: '3-5 days',
+          },
+          items: [
+            {
+              orderLineItemId: 'order_item_1',
+              productId: 'product_1',
+              productSlug: 'everyday-training-short',
+              productName: 'Everyday Training Short',
+              productFit: 'Regular fit',
+              productColor: 'Black',
+              size: 'm',
+              quantity: 1,
+              unitPriceCents: 5200,
+              lineSubtotalCents: 5200,
+              currency: 'USD',
+              primaryImageUrl: 'https://example.com/short-a.jpg',
+              secondaryImageUrl: null,
+            },
+          ],
+          statusTimestamps: {
+            paidAt: new Date().toISOString(),
+            cancelledAt: null,
+            refundedAt: null,
+            shippedAt: null,
+            deliveredAt: null,
+          },
+          refundPlaceholder: {
+            status: null,
+            reason: null,
+            externalReference: null,
+          },
+          createdBy: 'user_1',
+          updatedBy: 'user_1',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname.startsWith('/orders/') && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          orderId: 'order_1',
+          orderNumber: state.orderNumber ?? 'SP-20260517-AB12CD',
+          status: 'paid',
+          payment: {
+            provider: 'stripe',
+            providerSessionId: state.providerSessionId,
+          },
+          contact: {
+            email: 'checkout@shoppilot.local',
+            phone: '0900000000',
+          },
+          totals: {
+            currency: 'USD',
+            subtotalCents: 5200,
+            shippingCents: 500,
+            taxCents: 242,
+            totalCents: 5942,
+          },
+          shipping: {
+            recipientName: 'Dagmawi',
+            country: 'ET',
+            city: 'Addis Ababa',
+            postalCode: '2000',
+            line1: 'Yeka Sub-city',
+            line2: null,
+            phone: '0900000000',
+            methodName: 'Standard Shipping',
+            etaLabel: '3-5 days',
+          },
+          items: [
+            {
+              orderLineItemId: 'order_item_1',
+              productId: 'product_1',
+              productSlug: 'everyday-training-short',
+              productName: 'Everyday Training Short',
+              productFit: 'Regular fit',
+              productColor: 'Black',
+              size: 'm',
+              quantity: 1,
+              unitPriceCents: 5200,
+              lineSubtotalCents: 5200,
+              currency: 'USD',
+              primaryImageUrl: 'https://example.com/short-a.jpg',
+              secondaryImageUrl: null,
+            },
+          ],
+          statusTimestamps: {
+            paidAt: new Date().toISOString(),
+            cancelledAt: null,
+            refundedAt: null,
+            shippedAt: null,
+            deliveredAt: null,
+          },
+          refundPlaceholder: {
+            status: null,
+            reason: null,
+            externalReference: null,
+          },
+          createdBy: 'user_1',
+          updatedBy: 'user_1',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         }),
       });
       return;
@@ -286,11 +450,7 @@ async function mockCheckoutApis(page: Page) {
       return;
     }
 
-    await route.fulfill({
-      status: 404,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Not found.' } }),
-    });
+    await route.continue();
   });
 
   return state;
@@ -344,9 +504,11 @@ test('checkout page remains usable with no horizontal overflow on required viewp
   }
 });
 
-test('payment return page shows success state for paid payment status', async ({ page }) => {
+test('order confirmation page renders order details for a finalized order', async ({ page }) => {
   const state = await mockCheckoutApis(page);
-  state.paymentStatus = 'paid';
-  await page.goto('/checkout/payment-return?sessionToken=checkout_token_1&providerSessionId=cs_test_1');
-  await expect(page.getByRole('heading', { name: 'Payment complete' })).toBeVisible();
+  state.orderNumber = 'SP-20260517-AB12CD';
+
+  await page.goto('/orders/SP-20260517-AB12CD');
+  await expect(page.getByRole('heading', { name: 'SP-20260517-AB12CD' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Totals' })).toBeVisible();
 });

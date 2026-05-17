@@ -19,6 +19,7 @@ model User {
   wishlist          Wishlist?
   addresses         Address[]
   checkoutSessions  CheckoutSession[]
+  orders            Order[]
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
@@ -100,6 +101,7 @@ model Product {
   secondaryImageUrl String?
   cartItems         CartItem[]
   wishlistItems     WishlistItem[]
+  orderLineItems    OrderLineItem[]
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
@@ -201,6 +203,7 @@ model CheckoutSession {
   priceValidatedAt         DateTime
   pricingSnapshotId        String?
   paymentProviderSessionId String?
+  order                    Order?
   expiresAt                DateTime
   isActive                 Boolean  @default(true)
   createdAt                DateTime @default(now())
@@ -212,6 +215,79 @@ model CheckoutSession {
   @@index([expiresAt], map: "checkout_sessions_expires_at_idx")
   @@index([selectedAddressId], map: "checkout_sessions_selected_address_id_idx")
   @@map("checkout_sessions")
+}
+
+model Order {
+  id                           String      @id @default(cuid())
+  orderNumber                  String      @unique
+  userId                       String
+  user                         User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  checkoutSessionId            String      @unique
+  checkoutSession              CheckoutSession @relation(fields: [checkoutSessionId], references: [id], onDelete: Restrict)
+  placeOrderIdempotencyKey     String
+  paymentProvider              String      @default("stripe")
+  paymentProviderSessionId     String?
+  status                       OrderStatus @default(PENDING_PAYMENT)
+  currency                     String      @default("USD")
+  subtotalCents                Int
+  shippingCents                Int
+  taxCents                     Int
+  totalCents                   Int
+  contactEmail                 String
+  contactPhone                 String
+  shippingMethodName           String      @default("Standard Shipping")
+  shippingEtaLabel             String      @default("3-5 days")
+  shipToRecipientName          String
+  shipToCountry                String
+  shipToCity                   String
+  shipToPostalCode             String
+  shipToLine1                  String
+  shipToLine2                  String?
+  shipToPhone                  String?
+  createdBy                    String
+  updatedBy                    String
+  paidAt                       DateTime?
+  cancelledAt                  DateTime?
+  refundedAt                   DateTime?
+  shippedAt                    DateTime?
+  deliveredAt                  DateTime?
+  refundStatusPlaceholder      String?
+  refundReasonPlaceholder      String?
+  refundExternalRefPlaceholder String?
+  items                        OrderLineItem[]
+  createdAt                    DateTime    @default(now())
+  updatedAt                    DateTime    @updatedAt
+
+  /// future: refunds lifecycle - placeholder schema reserved for later refund operations
+  @@unique([userId, checkoutSessionId, placeOrderIdempotencyKey], map: "orders_user_checkout_idempotency_key")
+  @@index([userId, createdAt], map: "orders_user_id_created_at_idx")
+  @@index([status, createdAt], map: "orders_status_created_at_idx")
+  @@map("orders")
+}
+
+model OrderLineItem {
+  id              String      @id @default(cuid())
+  orderId         String
+  order           Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productSlug     String
+  productName     String
+  productFit      String
+  productColor    String
+  productSize     ProductSize
+  quantity        Int
+  unitPriceCents  Int
+  lineSubtotalCents Int
+  currency        String      @default("USD")
+  primaryImageUrl String
+  secondaryImageUrl String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([orderId], map: "order_line_items_order_id_idx")
+  @@index([productId], map: "order_line_items_product_id_idx")
+  @@map("order_line_items")
 }
 
 enum Role {
@@ -234,4 +310,14 @@ enum ProductSize {
   M
   L
   XL
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
 }

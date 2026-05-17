@@ -97,7 +97,7 @@ function DesktopCategory({ category }: DesktopCategoryProps) {
     >
       <Link
         href={category.href}
-        className="inline-flex h-full items-center px-3 font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground transition-colors hover:text-primary focus-visible:text-primary"
+        className="inline-flex h-full items-center px-3 font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground"
       >
         {category.label}
       </Link>
@@ -146,7 +146,7 @@ function MobileCategory({ category }: DesktopCategoryProps) {
           <li key={item.label}>
             <Link
               href={item.href}
-              className="block rounded-md px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-muted hover:text-primary"
+              className="block rounded-md px-2 py-1.5 text-sm text-foreground"
             >
               {item.label}
             </Link>
@@ -164,6 +164,7 @@ export function CustomerNavHeader() {
   const [desktopAccountMenuOpen, setDesktopAccountMenuOpen] = useState(false);
   const [mobileAccountMenuOpen, setMobileAccountMenuOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerCheckoutPending, setDrawerCheckoutPending] = useState(false);
   const [drawerInitialTab, setDrawerInitialTab] = useState<'cart' | 'wishlist'>('cart');
   const [accountActionLoading, setAccountActionLoading] = useState(false);
   const cartItemCount = useCartUiStore((state) => state.itemCount);
@@ -177,14 +178,47 @@ export function CustomerNavHeader() {
   const clearUser = useAuthStore((state) => state.clearUser);
   const desktopAccountMenuRef = useRef<HTMLDivElement | null>(null);
   const mobileAccountMenuRef = useRef<HTMLDivElement | null>(null);
+  const drawerCheckoutPendingRef = useRef(false);
   const greetingName = useMemo(() => resolveGreetingName(user), [user]);
+
+  useEffect(() => {
+    drawerCheckoutPendingRef.current = drawerCheckoutPending;
+  }, [drawerCheckoutPending]);
 
   useEffect(() => {
     setMobileMenuOpen(false);
     setDesktopAccountMenuOpen(false);
     setMobileAccountMenuOpen(false);
+
+    if (drawerCheckoutPendingRef.current && pathname === '/checkout') {
+      return;
+    }
+
     setDrawerOpen(false);
+
+    if (drawerCheckoutPendingRef.current) {
+      drawerCheckoutPendingRef.current = false;
+      setDrawerCheckoutPending(false);
+    }
   }, [pathname]);
+
+  useEffect(() => {
+    if (!drawerCheckoutPending) {
+      return;
+    }
+
+    function handleCheckoutReady() {
+      setDrawerOpen(false);
+      setDrawerCheckoutPending(false);
+      drawerCheckoutPendingRef.current = false;
+    }
+
+    window.addEventListener('checkout:ready', handleCheckoutReady);
+
+    return () => {
+      window.removeEventListener('checkout:ready', handleCheckoutReady);
+    };
+  }, [drawerCheckoutPending]);
 
   useEffect(() => {
     if (sessionChecked) {
@@ -405,7 +439,7 @@ export function CustomerNavHeader() {
           ))}
           <Link
             href="/catalog"
-            className="inline-flex h-full items-center px-3 font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground transition-colors hover:text-primary focus-visible:text-primary"
+            className="inline-flex h-full items-center px-3 font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground"
           >
             See all
           </Link>
@@ -425,7 +459,7 @@ export function CustomerNavHeader() {
               name="q"
               type="search"
               placeholder="What are you looking for?"
-              className="h-10 w-72 rounded-full border border-border bg-muted pl-9 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+              className="h-10 w-72 rounded-full border border-border bg-muted pl-9 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-black focus:outline-none focus:ring-1 focus:ring-black focus:ring-offset-0"
             />
             <button type="submit" className="sr-only">
               Search
@@ -601,8 +635,14 @@ export function CustomerNavHeader() {
 
       <CartWishlistDrawer
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false);
+          setDrawerCheckoutPending(false);
+          drawerCheckoutPendingRef.current = false;
+        }}
         initialTab={drawerInitialTab}
+        checkoutPending={drawerCheckoutPending}
+        onCheckoutStart={() => setDrawerCheckoutPending(true)}
       />
     </header>
   );

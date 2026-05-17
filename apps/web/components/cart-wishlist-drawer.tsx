@@ -22,9 +22,17 @@ type CartWishlistDrawerProps = {
   open: boolean;
   onClose: () => void;
   initialTab: DrawerTab;
+  checkoutPending: boolean;
+  onCheckoutStart: () => void;
 };
 
-export function CartWishlistDrawer({ open, onClose, initialTab }: CartWishlistDrawerProps) {
+export function CartWishlistDrawer({
+  open,
+  onClose,
+  initialTab,
+  checkoutPending,
+  onCheckoutStart,
+}: CartWishlistDrawerProps) {
   const router = useRouter();
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
@@ -288,7 +296,8 @@ export function CartWishlistDrawer({ open, onClose, initialTab }: CartWishlistDr
           <CartWishlistDrawerFooter
             subtotalCents={cachedCart.summary.subtotalCents}
             currency={cachedCart.summary.currency}
-            onClose={onClose}
+            checkoutPending={checkoutPending}
+            onCheckoutStart={onCheckoutStart}
           />
         ) : null}
       </aside>

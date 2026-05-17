@@ -3,6 +3,7 @@ import type {
   SelectCheckoutAddressInput,
   UpdateCheckoutContactInput,
 } from '@shoppilot/db/checkout-contract';
+import type { PlaceOrderInput } from '@shoppilot/db/order-contract';
 import { z } from 'zod';
 
 function getSingleValue(value: unknown): string | undefined {
@@ -37,6 +38,22 @@ const updateContactSchema = z.object({
       .min(7)
       .max(32)
       .regex(/^[0-9+()\-\s]+$/, 'Phone number is invalid.'),
+  ),
+});
+
+const placeOrderSchema = z.object({
+  checkoutSessionToken: z.preprocess(
+    (value) => getSingleValue(value),
+    z.string().trim().min(1).max(200),
+  ),
+  idempotencyKey: z.preprocess(
+    (value) => getSingleValue(value),
+    z
+      .string()
+      .trim()
+      .min(8)
+      .max(255)
+      .regex(/^[a-zA-Z0-9:_-]+$/, 'Idempotency key is invalid.'),
   ),
 });
 
@@ -77,4 +94,8 @@ export function parseCheckoutProviderSessionIdOrThrow(input: unknown): string {
     z.preprocess((value) => getSingleValue(value), z.string().trim().min(1).max(255)),
     input,
   );
+}
+
+export function parsePlaceOrderInputOrThrow(input: unknown): PlaceOrderInput {
+  return parseOrThrow(placeOrderSchema, input);
 }

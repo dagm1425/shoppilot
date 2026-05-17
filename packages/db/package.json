@@ -29,6 +29,10 @@
     "./checkout-contract": {
       "types": "./dist/checkout-contract.d.ts",
       "default": "./dist/checkout-contract.js"
+    },
+    "./order-contract": {
+      "types": "./dist/order-contract.d.ts",
+      "default": "./dist/order-contract.js"
     }
   },
   "scripts": {

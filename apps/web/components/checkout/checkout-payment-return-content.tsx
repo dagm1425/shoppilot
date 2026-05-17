@@ -2,11 +2,20 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { createCheckoutPaymentSession, fetchCheckoutPaymentStatus, getCheckoutErrorMessage } from '../../lib/checkout-api';
+import {
+  createCheckoutPaymentSession,
+  fetchCheckoutPaymentStatus,
+  getCheckoutErrorMessage,
+  placeOrder,
+} from '../../lib/checkout-api';
 import { reportClientError } from '../../lib/client-error';
 import { StatePanel } from '../state-panel';
 
-type Status = 'loading' | 'success' | 'error';
+type Status = 'loading' | 'placing' | 'error';
+
+function buildPlaceOrderIdempotencyKey(sessionToken: string, providerSessionId: string): string {
+  return `order:${sessionToken}:${providerSessionId}`;
+}
 
 export function CheckoutPaymentReturnContent() {
   const router = useRouter();
@@ -16,7 +25,7 @@ export function CheckoutPaymentReturnContent() {
   const providerSessionId = searchParams.get('providerSessionId');
 
   const [status, setStatus] = useState<Status>('loading');
-  const [message, setMessage] = useState('Checking payment status...');
+  const [message, setMessage] = useState('Could not finalize your order right now.');
   const [pendingRetry, setPendingRetry] = useState(false);
 
   const canRetry = useMemo(() => Boolean(sessionToken), [sessionToken]);
@@ -24,7 +33,7 @@ export function CheckoutPaymentReturnContent() {
   useEffect(() => {
     let active = true;
 
-    async function loadStatus() {
+    async function finalizeOrder() {
       if (!sessionToken || !providerSessionId) {
         if (!active) return;
         setStatus('error');
@@ -43,41 +52,55 @@ export function CheckoutPaymentReturnContent() {
           return;
         }
 
-        if (response.data.status === 'paid') {
-          setStatus('success');
-          setMessage('Payment received. Your order confirmation is next in subphase 2.3.');
-          return;
-        }
+        if (response.data.status !== 'paid') {
+          if (response.data.status === 'open' || response.data.status === 'pending') {
+            setStatus('error');
+            setMessage('Payment is still open. You can retry to continue payment.');
+            return;
+          }
 
-        if (response.data.status === 'open' || response.data.status === 'pending') {
+          if (response.data.status === 'canceled' || response.data.status === 'expired') {
+            setStatus('error');
+            setMessage('Payment was canceled or expired. Retry payment to continue.');
+            return;
+          }
+
           setStatus('error');
-          setMessage('Payment is still open. You can retry to continue payment.');
+          setMessage('Payment did not complete. Retry payment to continue.');
           return;
         }
 
-        if (response.data.status === 'canceled' || response.data.status === 'expired') {
+        setStatus('placing');
+
+        const placeOrderResponse = await placeOrder({
+          checkoutSessionToken: sessionToken,
+          idempotencyKey: buildPlaceOrderIdempotencyKey(sessionToken, providerSessionId),
+        });
+
+        if (!active) return;
+
+        if (!placeOrderResponse.ok) {
           setStatus('error');
-          setMessage('Payment was canceled or expired. Retry payment to continue.');
+          setMessage(getCheckoutErrorMessage(placeOrderResponse.message, placeOrderResponse.code));
           return;
         }
 
-        setStatus('error');
-        setMessage('Payment did not complete. Retry payment to continue.');
+        router.replace(`/orders/${encodeURIComponent(placeOrderResponse.data.orderNumber)}`);
       } catch (error) {
         if (!active) return;
 
-        reportClientError({ error, context: 'checkout:payment-return-status' });
+        reportClientError({ error, context: 'checkout:payment-return-finalize' });
         setStatus('error');
-        setMessage('Could not verify payment status right now.');
+        setMessage('Could not finalize your order right now.');
       }
     }
 
-    void loadStatus();
+    void finalizeOrder();
 
     return () => {
       active = false;
     };
-  }, [providerSessionId, sessionToken]);
+  }, [providerSessionId, router, sessionToken]);
 
   async function handleRetryPayment() {
     if (!sessionToken) {
@@ -105,31 +128,27 @@ export function CheckoutPaymentReturnContent() {
     }
   }
 
-  if (status === 'loading') {
-    return <StatePanel variant="loading" title="Payment return" description={message} />;
-  }
-
-  if (status === 'success') {
+  if (status === 'loading' || status === 'placing') {
     return (
-      <StatePanel variant="success" title="Payment complete" description={message}>
-        <button
-          type="button"
-          onClick={() => router.push('/checkout')}
-          className="rounded-full border border-black/20 bg-white px-4 py-2 text-sm font-semibold text-black"
-        >
-          Back to checkout
-        </button>
-      </StatePanel>
+      <section className="rounded-lg border border-muted bg-muted/50 p-4 text-foreground">
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden="true"
+            className="size-4 animate-spin rounded-full border-2 border-foreground border-t-transparent"
+          />
+          <h2 className="text-base font-semibold">Processing your order</h2>
+        </div>
+      </section>
     );
   }
 
   return (
     <StatePanel variant="error" title="Payment incomplete" description={message}>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => router.push('/checkout')}
-          className="rounded-full border border-black/20 bg-white px-4 py-2 text-sm font-semibold text-black"
+          className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
         >
           Back to checkout
         </button>
@@ -138,7 +157,7 @@ export function CheckoutPaymentReturnContent() {
             type="button"
             onClick={handleRetryPayment}
             disabled={pendingRetry}
-            className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            className="inline-flex items-center rounded-md border border-foreground bg-foreground px-3 py-2 text-sm font-medium text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
           >
             {pendingRetry ? 'Retrying...' : 'Retry payment'}
           </button>

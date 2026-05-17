@@ -5,6 +5,7 @@ import type {
   SelectCheckoutAddressInput,
   UpdateCheckoutContactInput,
 } from '@shoppilot/db/checkout-contract';
+import type { PlaceOrderInput, PlaceOrderResponse } from '@shoppilot/db/order-contract';
 
 type ApiError = {
   error?: {
@@ -95,6 +96,18 @@ export function getCheckoutErrorMessage(message: string, code?: string): string 
     return 'Payment is temporarily unavailable. Please retry.';
   }
 
+  if (code === 'CHECKOUT_PAYMENT_NOT_PAID') {
+    return 'Payment is not complete yet. Retry payment to continue.';
+  }
+
+  if (code === 'CHECKOUT_STOCK_REVALIDATION_FAILED') {
+    return 'Stock changed before order placement. Review cart and retry.';
+  }
+
+  if (code === 'ORDER_IDEMPOTENCY_KEY_MISMATCH') {
+    return 'Order submission conflict detected. Return to checkout and retry safely.';
+  }
+
   return message;
 }
 
@@ -161,4 +174,17 @@ export async function fetchCheckoutPaymentStatus(token: string, providerSessionI
   );
 
   return parseResponse<CheckoutPaymentStatusResponse>(response);
+}
+
+export async function placeOrder(input: PlaceOrderInput) {
+  const response = await fetch(`${getApiBase()}/checkout/place-order`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  return parseResponse<PlaceOrderResponse>(response);
 }

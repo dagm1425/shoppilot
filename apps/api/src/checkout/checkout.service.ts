@@ -16,10 +16,12 @@ import type {
   SelectCheckoutAddressInput,
   UpdateCheckoutContactInput,
 } from '@shoppilot/db/checkout-contract';
-import type { Prisma } from '@prisma/client';
+import type { OrderStatus, PlaceOrderInput, PlaceOrderResponse } from '@shoppilot/db/order-contract';
+import { OrderStatus as PrismaOrderStatus, type Prisma } from '@prisma/client';
 import { evaluateCartLine, buildCartSummary } from '../cart/cart.policy.js';
 import type { AuthenticatedRequestUser } from '../auth/auth.types.js';
 import { parseEnv } from '../config/env.js';
+import { mapOrderRecord, orderWithItemsInclude } from '../orders/orders.mapper.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { StripeCheckoutProvider } from './stripe-checkout.provider.js';
 
@@ -43,6 +45,39 @@ const checkoutSessionInclude = {
 type CheckoutSessionWithAddress = Prisma.CheckoutSessionGetPayload<{
   include: typeof checkoutSessionInclude;
 }>;
+
+const checkoutSessionForOrderInclude = {
+  selectedAddress: true,
+  cart: {
+    include: {
+      items: {
+        include: {
+          product: true,
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+    },
+  },
+  order: {
+    include: orderWithItemsInclude,
+  },
+} satisfies Prisma.CheckoutSessionInclude;
+
+type CheckoutSessionForOrder = Prisma.CheckoutSessionGetPayload<{
+  include: typeof checkoutSessionForOrderInclude;
+}>;
+
+const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  pending_payment: ['paid', 'cancelled'],
+  paid: ['processing', 'cancelled', 'refunded'],
+  processing: ['shipped', 'cancelled', 'refunded'],
+  shipped: ['delivered', 'refunded'],
+  delivered: ['refunded'],
+  cancelled: [],
+  refunded: [],
+};
 
 @Injectable()
 export class CheckoutService {
@@ -430,6 +465,212 @@ export class CheckoutService {
     };
   }
 
+  async placeOrder(
+    user: AuthenticatedRequestUser,
+    input: PlaceOrderInput,
+    requestId?: string,
+  ): Promise<PlaceOrderResponse> {
+    const session = await this.findSessionForOrderOrThrow(input.checkoutSessionToken, user.id);
+
+    if (session.order) {
+      this.assertIdempotencyReplayOrThrow(
+        session.order.placeOrderIdempotencyKey,
+        input.idempotencyKey,
+      );
+
+      this.logger.log({
+        event: 'order.place',
+        requestId: requestId ?? 'unknown-request-id',
+        userId: user.id,
+        orderId: session.order.id,
+        orderNumber: session.order.orderNumber,
+        idempotencyKey: input.idempotencyKey,
+        outcome: 'replay',
+      });
+
+      return mapOrderRecord(session.order);
+    }
+
+    this.assertSessionIsActive(session);
+
+    const blockingReasons = this.resolveBlockingReasons(
+      session.selectedAddressId,
+      session.contactEmail,
+      session.contactPhone,
+    );
+
+    if (blockingReasons.length > 0 || !session.selectedAddress) {
+      throw new HttpException(
+        {
+          code: 'CHECKOUT_NOT_READY',
+          message: 'Complete required checkout details before placing order.',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    if (!session.paymentProviderSessionId) {
+      throw new HttpException(
+        {
+          code: 'CHECKOUT_PAYMENT_SESSION_NOT_FOUND',
+          message: 'Payment session not found for this checkout.',
+        },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    // future: webhook reconciliation - payment terminal-state harmonization in subphase 2.4
+    const providerSession = await this.stripeCheckoutProvider.retrieveSession(
+      session.paymentProviderSessionId,
+    );
+    const paymentStatus = this.mapStripeStatus(providerSession.status, providerSession.payment_status);
+    if (paymentStatus !== 'paid') {
+      throw new HttpException(
+        {
+          code: 'CHECKOUT_PAYMENT_NOT_PAID',
+          message: 'Payment is not complete for this checkout.',
+        },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const liveSnapshot = this.mapCartSnapshot(session.cart as CartWithItems);
+    this.assertCartIsCheckoutReady(liveSnapshot);
+
+    const now = new Date();
+    const paidTransition = this.buildOrderStatusTransitionPatch('pending_payment', 'paid', now);
+
+    const createdOrder = await this.prisma.$transaction(async (transaction) => {
+      const freshSession = await transaction.checkoutSession.findFirst({
+        where: {
+          id: session.id,
+          userId: user.id,
+        },
+        include: checkoutSessionForOrderInclude,
+      });
+
+      if (!freshSession) {
+        throw new HttpException(
+          {
+            code: 'CHECKOUT_SESSION_NOT_FOUND',
+            message: 'Checkout session not found.',
+          },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      if (freshSession.order) {
+        this.assertIdempotencyReplayOrThrow(
+          freshSession.order.placeOrderIdempotencyKey,
+          input.idempotencyKey,
+        );
+        return freshSession.order;
+      }
+
+      this.assertSessionIsActive(freshSession);
+
+      if (!freshSession.selectedAddress || !freshSession.contactEmail || !freshSession.contactPhone) {
+        throw new HttpException(
+          {
+            code: 'CHECKOUT_NOT_READY',
+            message: 'Complete required checkout details before placing order.',
+          },
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      const freshSnapshot = this.mapCartSnapshot(freshSession.cart as CartWithItems);
+      this.assertCartIsCheckoutReady(freshSnapshot);
+      const freshPricing = this.computePricing(
+        freshSnapshot.summary,
+        freshSession.selectedAddress.country,
+      );
+
+      await this.atomicDecrementStockOrThrow(transaction, freshSession.cart.items);
+
+      const order = await transaction.order.create({
+        data: {
+          orderNumber: this.generateOrderNumber(now),
+          userId: user.id,
+          checkoutSessionId: freshSession.id,
+          placeOrderIdempotencyKey: input.idempotencyKey,
+          paymentProvider: 'stripe',
+          paymentProviderSessionId: freshSession.paymentProviderSessionId,
+          status: paidTransition.status,
+          paidAt: paidTransition.paidAt,
+          currency: freshPricing.currency,
+          subtotalCents: freshPricing.subtotalCents,
+          shippingCents: freshPricing.shippingCents,
+          taxCents: freshPricing.taxCents,
+          totalCents: freshPricing.totalCents,
+          contactEmail: freshSession.contactEmail,
+          contactPhone: freshSession.contactPhone,
+          shipToRecipientName: freshSession.selectedAddress.recipientName,
+          shipToCountry: freshSession.selectedAddress.country,
+          shipToCity: freshSession.selectedAddress.city,
+          shipToPostalCode: freshSession.selectedAddress.postalCode,
+          shipToLine1: freshSession.selectedAddress.line1,
+          shipToLine2: freshSession.selectedAddress.line2,
+          shipToPhone: freshSession.selectedAddress.phone,
+          createdBy: user.id,
+          updatedBy: user.id,
+          // future: refunds lifecycle - placeholder schema reserved for later refund operations
+          refundStatusPlaceholder: null,
+          refundReasonPlaceholder: null,
+          refundExternalRefPlaceholder: null,
+          items: {
+            create: freshSession.cart.items.map((item) => ({
+              productId: item.productId,
+              productSlug: item.product.slug,
+              productName: item.product.name,
+              productFit: item.product.fit,
+              productColor: item.product.color,
+              productSize: item.size,
+              quantity: item.quantity,
+              unitPriceCents: item.product.priceCents,
+              lineSubtotalCents: item.product.priceCents * item.quantity,
+              currency: item.product.currency,
+              primaryImageUrl: item.product.primaryImageUrl,
+              secondaryImageUrl: item.product.secondaryImageUrl,
+            })),
+          },
+        },
+        include: orderWithItemsInclude,
+      });
+
+      await transaction.cartItem.deleteMany({
+        where: {
+          cartId: freshSession.cartId,
+        },
+      });
+
+      await transaction.checkoutSession.updateMany({
+        where: {
+          userId: user.id,
+          cartId: freshSession.cartId,
+          isActive: true,
+        },
+        data: {
+          isActive: false,
+        },
+      });
+
+      return order;
+    });
+
+    this.logger.log({
+      event: 'order.place',
+      requestId: requestId ?? 'unknown-request-id',
+      userId: user.id,
+      orderId: createdOrder.id,
+      orderNumber: createdOrder.orderNumber,
+      idempotencyKey: input.idempotencyKey,
+      outcome: 'success',
+    });
+
+    return mapOrderRecord(createdOrder);
+  }
+
   private resolveBlockingReasons(
     selectedAddressId: string | null,
     contactEmail: string | null,
@@ -489,6 +730,139 @@ export class CheckoutService {
         HttpStatus.CONFLICT,
       );
     }
+  }
+
+  private async atomicDecrementStockOrThrow(
+    transaction: Prisma.TransactionClient,
+    cartItems: CheckoutSessionForOrder['cart']['items'],
+  ): Promise<void> {
+    for (const item of cartItems) {
+      const update = await transaction.product.updateMany({
+        where: {
+          id: item.productId,
+          available: true,
+          stock: {
+            gte: item.quantity,
+          },
+        },
+        data: {
+          stock: {
+            decrement: item.quantity,
+          },
+        },
+      });
+
+      if (update.count !== 1) {
+        throw new HttpException(
+          {
+            code: 'CHECKOUT_STOCK_REVALIDATION_FAILED',
+            message: 'Stock changed before order placement. Refresh cart and retry.',
+          },
+          HttpStatus.CONFLICT,
+        );
+      }
+    }
+  }
+
+  private buildOrderStatusTransitionPatch(
+    current: OrderStatus,
+    next: OrderStatus,
+    changedAt: Date,
+  ): {
+    status: PrismaOrderStatus;
+    paidAt?: Date;
+    cancelledAt?: Date;
+    refundedAt?: Date;
+    shippedAt?: Date;
+    deliveredAt?: Date;
+  } {
+    this.assertOrderStatusTransitionOrThrow(current, next);
+
+    const patch: {
+      status: PrismaOrderStatus;
+      paidAt?: Date;
+      cancelledAt?: Date;
+      refundedAt?: Date;
+      shippedAt?: Date;
+      deliveredAt?: Date;
+    } = {
+      status: this.toPrismaOrderStatus(next),
+    };
+
+    if (next === 'paid') {
+      patch.paidAt = changedAt;
+    }
+
+    if (next === 'cancelled') {
+      patch.cancelledAt = changedAt;
+    }
+
+    if (next === 'refunded') {
+      patch.refundedAt = changedAt;
+    }
+
+    // future: fulfillment transitions - shipped/delivered mutation path added in later admin flow
+    if (next === 'shipped') {
+      patch.shippedAt = changedAt;
+    }
+
+    if (next === 'delivered') {
+      patch.deliveredAt = changedAt;
+    }
+
+    return patch;
+  }
+
+  private assertOrderStatusTransitionOrThrow(current: OrderStatus, next: OrderStatus): void {
+    if (current === next) {
+      return;
+    }
+
+    if (ORDER_STATUS_TRANSITIONS[current]?.includes(next)) {
+      return;
+    }
+
+    throw new HttpException(
+      {
+        code: 'ORDER_STATUS_TRANSITION_INVALID',
+        message: `Invalid order status transition from ${current} to ${next}.`,
+      },
+      HttpStatus.CONFLICT,
+    );
+  }
+
+  private toPrismaOrderStatus(status: OrderStatus): PrismaOrderStatus {
+    switch (status) {
+      case 'paid':
+        return PrismaOrderStatus.PAID;
+      case 'processing':
+        return PrismaOrderStatus.PROCESSING;
+      case 'shipped':
+        return PrismaOrderStatus.SHIPPED;
+      case 'delivered':
+        return PrismaOrderStatus.DELIVERED;
+      case 'cancelled':
+        return PrismaOrderStatus.CANCELLED;
+      case 'refunded':
+        return PrismaOrderStatus.REFUNDED;
+      case 'pending_payment':
+      default:
+        return PrismaOrderStatus.PENDING_PAYMENT;
+    }
+  }
+
+  private assertIdempotencyReplayOrThrow(existingKey: string, requestedKey: string): void {
+    if (existingKey === requestedKey) {
+      return;
+    }
+
+    throw new HttpException(
+      {
+        code: 'ORDER_IDEMPOTENCY_KEY_MISMATCH',
+        message: 'Order was already created with a different idempotency key.',
+      },
+      HttpStatus.CONFLICT,
+    );
   }
 
   private async getOrCreateCart(userId: string): Promise<CartWithItems> {
@@ -654,6 +1028,31 @@ export class CheckoutService {
     return session;
   }
 
+  private async findSessionForOrderOrThrow(
+    token: string,
+    userId: string,
+  ): Promise<CheckoutSessionForOrder> {
+    const session = await this.prisma.checkoutSession.findFirst({
+      where: {
+        token,
+        userId,
+      },
+      include: checkoutSessionForOrderInclude,
+    });
+
+    if (!session) {
+      throw new HttpException(
+        {
+          code: 'CHECKOUT_SESSION_NOT_FOUND',
+          message: 'Checkout session not found.',
+        },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    return session;
+  }
+
   private assertSessionIsActive(session: CheckoutSessionWithAddress): void {
     if (!session.isActive || session.expiresAt.getTime() <= Date.now()) {
       throw new HttpException(
@@ -668,6 +1067,12 @@ export class CheckoutService {
 
   private generateSessionToken(): string {
     return randomBytes(24).toString('hex');
+  }
+
+  private generateOrderNumber(now: Date): string {
+    const datePart = now.toISOString().slice(0, 10).replaceAll('-', '');
+    const randomPart = randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
+    return `SP-${datePart}-${randomPart}`;
   }
 
   private logSessionEvent(

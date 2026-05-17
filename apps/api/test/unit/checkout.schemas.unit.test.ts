@@ -2,6 +2,7 @@ import { HttpException } from '@nestjs/common';
 import {
   parseCheckoutProviderSessionIdOrThrow,
   parseCheckoutSessionTokenOrThrow,
+  parsePlaceOrderInputOrThrow,
   parseSelectCheckoutAddressInputOrThrow,
   parseUpdateCheckoutContactInputOrThrow,
 } from '../../src/checkout/checkout.schemas.js';
@@ -39,5 +40,26 @@ describe('checkout schemas', () => {
 
   it('rejects missing provider session id query input', () => {
     expect(() => parseCheckoutProviderSessionIdOrThrow(undefined)).toThrow(HttpException);
+  });
+
+  it('parses valid place-order payload', () => {
+    expect(
+      parsePlaceOrderInputOrThrow({
+        checkoutSessionToken: ' checkout_token_1 ',
+        idempotencyKey: ' order:checkout_token_1:cs_test_1 ',
+      }),
+    ).toEqual({
+      checkoutSessionToken: 'checkout_token_1',
+      idempotencyKey: 'order:checkout_token_1:cs_test_1',
+    });
+  });
+
+  it('rejects invalid place-order idempotency key', () => {
+    expect(() =>
+      parsePlaceOrderInputOrThrow({
+        checkoutSessionToken: 'checkout_token_1',
+        idempotencyKey: 'bad key with spaces',
+      }),
+    ).toThrow(HttpException);
   });
 });

@@ -7,7 +7,7 @@ import type {
 } from '@shoppilot/db/address-contract';
 import type { CheckoutSessionResponse } from '@shoppilot/db/checkout-contract';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useAuthStore } from '../../lib/auth-store';
 import {
   createAddress,
@@ -110,6 +110,7 @@ export function CheckoutPageContent() {
 
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<AddressFormState>(emptyAddressForm);
+  const checkoutReadyNotifiedRef = useRef(false);
 
   const selectedAddress = useMemo(
     () => addresses.find((address) => address.addressId === session?.selectedAddressId) ?? null,
@@ -216,6 +217,15 @@ export function CheckoutPageContent() {
       active = false;
     };
   }, [clearUser, pathname, retryCounter, router]);
+
+  useEffect(() => {
+    if (status === 'loading' || checkoutReadyNotifiedRef.current) {
+      return;
+    }
+
+    checkoutReadyNotifiedRef.current = true;
+    window.dispatchEvent(new CustomEvent('checkout:ready'));
+  }, [status]);
 
   async function refreshAddressesAndSession(nextToken?: string) {
     const token = nextToken ?? session?.sessionToken;
@@ -515,7 +525,7 @@ export function CheckoutPageContent() {
             Checkout
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Complete address and contact details to unlock payment in the next subphase.
+            Complete and save your address and contact details to unlock payment in the next subphase.
           </p>
 
         </section>
@@ -861,8 +871,27 @@ export function CheckoutPageContent() {
         ) : null}
       </div>
 
-      <aside className="mt-6 border-t border-border bg-[#f5f5f5] px-4 py-6 sm:px-6 lg:mt-0 lg:min-h-full lg:border-l lg:border-t-0 lg:px-10 lg:py-10">
-        <section className="rounded-[4px] border border-foreground/15 bg-background p-5">
+      <aside className="mt-6 border-t border-border bg-muted px-4 py-6 sm:px-6 lg:mt-0 lg:border-l lg:border-t-0 lg:px-10 lg:py-10">
+        <section className="bg-background p-5">
+          <h2 className="font-auth-heading text-sm font-bold uppercase tracking-wider text-foreground">
+            Items in this order
+          </h2>
+          <ul className="mt-3 divide-y divide-border border-y border-border">
+            {session.cartSnapshot.items.map((item) => (
+              <li key={item.itemId} className="flex items-start justify-between gap-3 py-2 text-sm">
+                <div>
+                  <p className="font-semibold text-foreground">{item.name}</p>
+                  <p className="text-muted-foreground">Qty {item.quantity}</p>
+                </div>
+                <p className="font-semibold text-foreground">
+                  {formatMoney(item.lineSubtotalCents, item.currency)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="mt-4 bg-background p-5">
           <h2 className="font-auth-heading text-sm font-bold uppercase tracking-wider text-foreground">
             Order summary
           </h2>
@@ -889,7 +918,7 @@ export function CheckoutPageContent() {
           </dl>
         </section>
 
-        <section className="mt-4 rounded-[4px] border border-foreground/15 bg-background p-5">
+        <section className="mt-4 bg-background p-5">
           <h2 className="font-auth-heading text-xs font-bold uppercase tracking-[0.08em] text-foreground">
             Selected address
           </h2>

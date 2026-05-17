@@ -7,6 +7,7 @@ import { CartModule } from './cart/cart.module.js';
 import { WishlistModule } from './wishlist/wishlist.module.js';
 import { AddressModule } from './address/address.module.js';
 import { CheckoutModule } from './checkout/checkout.module.js';
+import { OrdersModule } from './orders/orders.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { CheckoutModule } from './checkout/checkout.module.js';
     WishlistModule,
     AddressModule,
     CheckoutModule,
+    OrdersModule,
   ],
 })
 export class AppModule {}

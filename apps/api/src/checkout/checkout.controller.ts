@@ -18,6 +18,7 @@ import type { RequestWithContext } from '../common/request-context.js';
 import {
   parseCheckoutProviderSessionIdOrThrow,
   parseCheckoutSessionTokenOrThrow,
+  parsePlaceOrderInputOrThrow,
   parseSelectCheckoutAddressInputOrThrow,
   parseUpdateCheckoutContactInputOrThrow,
 } from './checkout.schemas.js';
@@ -147,6 +148,26 @@ export class CheckoutController {
           providerSessionId,
           request.requestId,
         ),
+    );
+  }
+
+  @Post('place-order')
+  @HttpCode(200)
+  async placeOrder(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Body() body: unknown,
+    @Req() request: RequestWithContext,
+  ) {
+    const input = parsePlaceOrderInputOrThrow(body);
+    Sentry.setTag('checkout.operation', 'place-order');
+    Sentry.setTag('order.operation', 'place-order');
+
+    return Sentry.startSpan(
+      {
+        name: 'checkout.place-order',
+        op: 'http.server',
+      },
+      async () => this.checkoutService.placeOrder(user, input, request.requestId),
     );
   }
 }

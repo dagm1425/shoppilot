@@ -117,6 +117,10 @@ export class ApiErrorFilter implements ExceptionFilter {
         return 'AUTH_UNAUTHORIZED';
       }
 
+      if (path.startsWith('/orders') && status === HttpStatus.UNAUTHORIZED) {
+        return 'AUTH_UNAUTHORIZED';
+      }
+
       if (path.startsWith('/me/addresses') && status === HttpStatus.UNAUTHORIZED) {
         return 'AUTH_UNAUTHORIZED';
       }
@@ -145,7 +149,15 @@ export class ApiErrorFilter implements ExceptionFilter {
     }
 
     if (path.startsWith('/checkout') || path.startsWith('/me/addresses')) {
+      if (path.startsWith('/checkout/place-order')) {
+        return 'phase-2.3';
+      }
+
       return 'phase-2.1';
+    }
+
+    if (path.startsWith('/orders')) {
+      return 'phase-2.3';
     }
 
     return 'phase-0';

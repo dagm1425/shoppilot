@@ -8,18 +8,21 @@ import { formatDrawerMoney } from './cart-wishlist-drawer-utils';
 type CartWishlistDrawerFooterProps = {
   subtotalCents: number;
   currency: string;
-  onClose: () => void;
+  checkoutPending: boolean;
+  onCheckoutStart: () => void;
 };
 
 export function CartWishlistDrawerFooter({
   subtotalCents,
   currency,
-  onClose,
+  checkoutPending,
+  onCheckoutStart,
 }: CartWishlistDrawerFooterProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const estimatedShippingCents = getEstimatedShippingCents(subtotalCents);
   const totalCents = getCheckoutTotalCents(subtotalCents);
+  const isBusy = isPending || checkoutPending;
 
   return (
     <footer className="sticky bottom-0 z-10 border-t border-border bg-background p-4">
@@ -39,10 +42,14 @@ export function CartWishlistDrawerFooter({
       </div>
       <button
         type="button"
-        disabled={isPending}
-        aria-busy={isPending}
+        disabled={isBusy}
+        aria-busy={isBusy}
         onClick={() => {
-          onClose();
+          if (isBusy) {
+            return;
+          }
+
+          onCheckoutStart();
           startTransition(() => {
             router.push('/checkout');
           });
@@ -50,7 +57,7 @@ export function CartWishlistDrawerFooter({
         className="inline-flex h-11 w-full items-center justify-center rounded-pill bg-foreground px-6 font-auth-heading text-xs font-bold uppercase tracking-[0.08em] text-background disabled:cursor-not-allowed disabled:opacity-70"
       >
         <span className="inline-flex items-center gap-2">
-          {isPending ? (
+          {isBusy ? (
             <span
               aria-hidden="true"
               className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent"
