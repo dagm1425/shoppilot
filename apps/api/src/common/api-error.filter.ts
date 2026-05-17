@@ -160,6 +160,10 @@ export class ApiErrorFilter implements ExceptionFilter {
       return 'phase-2.3';
     }
 
+    if (path.startsWith('/webhooks')) {
+      return 'phase-2.4';
+    }
+
     return 'phase-0';
   }
 }

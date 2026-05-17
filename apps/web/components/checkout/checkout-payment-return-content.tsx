@@ -11,7 +11,7 @@ import {
 import { reportClientError } from '../../lib/client-error';
 import { StatePanel } from '../state-panel';
 
-type Status = 'loading' | 'placing' | 'error';
+type Status = 'loading' | 'placing' | 'empty' | 'error';
 
 function buildPlaceOrderIdempotencyKey(sessionToken: string, providerSessionId: string): string {
   return `order:${sessionToken}:${providerSessionId}`;
@@ -23,6 +23,7 @@ export function CheckoutPaymentReturnContent() {
 
   const sessionToken = searchParams.get('sessionToken');
   const providerSessionId = searchParams.get('providerSessionId');
+  const returnStatus = searchParams.get('status');
 
   const [status, setStatus] = useState<Status>('loading');
   const [message, setMessage] = useState('Could not finalize your order right now.');
@@ -36,7 +37,7 @@ export function CheckoutPaymentReturnContent() {
     async function finalizeOrder() {
       if (!sessionToken || !providerSessionId) {
         if (!active) return;
-        setStatus('error');
+        setStatus('empty');
         setMessage('Missing payment return details. Please retry checkout.');
         return;
       }
@@ -55,6 +56,11 @@ export function CheckoutPaymentReturnContent() {
         if (response.data.status !== 'paid') {
           if (response.data.status === 'open' || response.data.status === 'pending') {
             setStatus('error');
+            if (returnStatus === 'canceled') {
+              setMessage('Payment was canceled. Retry payment when you are ready.');
+              return;
+            }
+
             setMessage('Payment is still open. You can retry to continue payment.');
             return;
           }
@@ -100,7 +106,7 @@ export function CheckoutPaymentReturnContent() {
     return () => {
       active = false;
     };
-  }, [providerSessionId, router, sessionToken]);
+  }, [providerSessionId, returnStatus, router, sessionToken]);
 
   async function handleRetryPayment() {
     if (!sessionToken) {
@@ -139,6 +145,26 @@ export function CheckoutPaymentReturnContent() {
           <h2 className="text-base font-semibold">Processing your order</h2>
         </div>
       </section>
+    );
+  }
+
+  if (status === 'empty') {
+    return (
+      <StatePanel
+        variant="empty"
+        title="Payment return incomplete"
+        description={message}
+      >
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => router.push('/checkout')}
+            className="inline-flex items-center rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Back to checkout
+          </button>
+        </div>
+      </StatePanel>
     );
   }
 

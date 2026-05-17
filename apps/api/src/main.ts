@@ -11,7 +11,7 @@ import { initializeSentry } from './observability/sentry.js';
 async function bootstrap() {
   const env = parseEnv(process.env);
   initializeSentry(env);
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
   const logger = new Logger('Bootstrap');
 
   app.enableCors({

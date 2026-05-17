@@ -35,7 +35,9 @@ export async function createTestApp(options?: {
 
   const testingModule = await builder.compile();
 
-  const app = testingModule.createNestApplication();
+  const app = testingModule.createNestApplication({
+    rawBody: true,
+  });
   app.use(cookieParser());
   app.use(requestContextMiddleware);
   app.useGlobalFilters(new ApiErrorFilter());

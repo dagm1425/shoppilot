@@ -290,6 +290,27 @@ model OrderLineItem {
   @@map("order_line_items")
 }
 
+model PaymentWebhookEvent {
+  id                String                    @id @default(cuid())
+  provider          String                    @default("stripe")
+  eventId           String                    @unique
+  eventType         String
+  providerSessionId String?
+  checkoutSessionId String?
+  orderId           String?
+  status            PaymentWebhookEventStatus @default(RECEIVED)
+  receivedAt        DateTime                  @default(now())
+  processedAt       DateTime?
+  lastError         String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  @@index([provider, eventType], map: "payment_webhook_events_provider_event_type_idx")
+  @@index([providerSessionId], map: "payment_webhook_events_provider_session_id_idx")
+  @@index([status, receivedAt], map: "payment_webhook_events_status_received_at_idx")
+  @@map("payment_webhook_events")
+}
+
 enum Role {
   CUSTOMER
   ADMIN
@@ -320,4 +341,12 @@ enum OrderStatus {
   DELIVERED
   CANCELLED
   REFUNDED
+}
+
+enum PaymentWebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
 }

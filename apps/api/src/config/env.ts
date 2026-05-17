@@ -28,6 +28,7 @@ const envSchema = z.object({
   CHECKOUT_TAX_RATE_CA: z.coerce.number().min(0).max(1).default(0.05),
   CHECKOUT_TAX_RATE_DEFAULT: z.coerce.number().min(0).max(1).default(0.0425),
   STRIPE_SECRET_KEY: z.string().min(1, 'STRIPE_SECRET_KEY is required.'),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_WEB_SUCCESS_URL: z.string().url().optional(),
   STRIPE_WEB_CANCEL_URL: z.string().url().optional(),
   EMAIL_FROM_ADDRESS: z.string().email().default('onboarding@resend.dev'),

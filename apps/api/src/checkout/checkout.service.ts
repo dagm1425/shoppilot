@@ -21,7 +21,7 @@ import { OrderStatus as PrismaOrderStatus, type Prisma } from '@prisma/client';
 import { evaluateCartLine, buildCartSummary } from '../cart/cart.policy.js';
 import type { AuthenticatedRequestUser } from '../auth/auth.types.js';
 import { parseEnv } from '../config/env.js';
-import { mapOrderRecord, orderWithItemsInclude } from '../orders/orders.mapper.js';
+import { mapOrderRecord, orderWithItemsInclude, type OrderWithItems } from '../orders/orders.mapper.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { StripeCheckoutProvider } from './stripe-checkout.provider.js';
 
@@ -68,6 +68,27 @@ const checkoutSessionForOrderInclude = {
 type CheckoutSessionForOrder = Prisma.CheckoutSessionGetPayload<{
   include: typeof checkoutSessionForOrderInclude;
 }>;
+
+type PaymentReconciliationSource = 'webhook' | 'return-flow';
+
+type PaymentReconciliationOutcome =
+  | 'missing_session'
+  | 'waiting'
+  | 'order_created'
+  | 'order_replay'
+  | 'terminal_no_order'
+  | 'terminal_applied'
+  | 'terminal_ignored';
+
+export type PaymentReconciliationResult = {
+  providerSessionId: string;
+  checkoutSessionId: string | null;
+  checkoutSessionToken: string | null;
+  paymentStatus: CheckoutPaymentStatus;
+  outcome: PaymentReconciliationOutcome;
+  orderId: string | null;
+  orderNumber: string | null;
+};
 
 const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   pending_payment: ['paid', 'cancelled'],
@@ -433,7 +454,6 @@ export class CheckoutService {
     requestId?: string,
   ): Promise<CheckoutPaymentStatusResponse> {
     const session = await this.findSessionOrThrow(token, user.id);
-    this.assertSessionIsActive(session);
 
     if (!session.paymentProviderSessionId || session.paymentProviderSessionId !== providerSessionId) {
       throw new HttpException(
@@ -445,8 +465,12 @@ export class CheckoutService {
       );
     }
 
-    const providerSession = await this.stripeCheckoutProvider.retrieveSession(providerSessionId);
-    const status = this.mapStripeStatus(providerSession.status, providerSession.payment_status);
+    const reconciliation = await this.reconcilePaymentByProviderSessionId(
+      providerSessionId,
+      'return-flow',
+      requestId,
+    );
+    const status = reconciliation.paymentStatus;
 
     this.logger.log({
       event: 'checkout.session.payment-status',
@@ -455,6 +479,9 @@ export class CheckoutService {
       provider: 'stripe',
       providerSessionId,
       outcome: status,
+      reconciliationOutcome: reconciliation.outcome,
+      orderId: reconciliation.orderId,
+      orderNumber: reconciliation.orderNumber,
     });
 
     return {
@@ -462,6 +489,92 @@ export class CheckoutService {
       provider: 'stripe',
       providerSessionId,
       status,
+    };
+  }
+
+  async reconcilePaymentByProviderSessionId(
+    providerSessionId: string,
+    source: PaymentReconciliationSource,
+    requestId?: string,
+  ): Promise<PaymentReconciliationResult> {
+    const session = await this.prisma.checkoutSession.findFirst({
+      where: {
+        paymentProviderSessionId: providerSessionId,
+      },
+      include: checkoutSessionForOrderInclude,
+    });
+
+    if (!session) {
+      this.logger.warn({
+        event: 'checkout.payment.reconcile',
+        source,
+        requestId: requestId ?? 'unknown-request-id',
+        provider: 'stripe',
+        providerSessionId,
+        outcome: 'missing-session',
+      });
+
+      return {
+        providerSessionId,
+        checkoutSessionId: null,
+        checkoutSessionToken: null,
+        paymentStatus: 'pending',
+        outcome: 'missing_session',
+        orderId: null,
+        orderNumber: null,
+      };
+    }
+
+    const providerSession = await this.stripeCheckoutProvider.retrieveSession(providerSessionId);
+    const paymentStatus = this.mapStripeStatus(providerSession.status, providerSession.payment_status);
+
+    if (paymentStatus === 'paid') {
+      const idempotencyKey = this.buildPlaceOrderIdempotencyKey(session.token, providerSessionId);
+      const finalized = await this.finalizePaidOrderFromSession({
+        session,
+        idempotencyKey,
+        enforceIdempotencyKeyMatch: false,
+        allowExpiredSession: true,
+        requestId,
+        source,
+      });
+
+      return {
+        providerSessionId,
+        checkoutSessionId: session.id,
+        checkoutSessionToken: session.token,
+        paymentStatus,
+        outcome: finalized.replayed ? 'order_replay' : 'order_created',
+        orderId: finalized.order.id,
+        orderNumber: finalized.order.orderNumber,
+      };
+    }
+
+    if (paymentStatus === 'failed' || paymentStatus === 'expired' || paymentStatus === 'canceled') {
+      return this.reconcileTerminalPaymentState(session, paymentStatus, source, requestId);
+    }
+
+    // future: async payment method states - extend terminal-state mapping when enabled
+    this.logger.log({
+      event: 'checkout.payment.reconcile',
+      source,
+      requestId: requestId ?? 'unknown-request-id',
+      provider: 'stripe',
+      providerSessionId,
+      checkoutSessionId: session.id,
+      checkoutSessionToken: session.token,
+      paymentStatus,
+      outcome: 'waiting',
+    });
+
+    return {
+      providerSessionId,
+      checkoutSessionId: session.id,
+      checkoutSessionToken: session.token,
+      paymentStatus,
+      outcome: 'waiting',
+      orderId: session.order?.id ?? null,
+      orderNumber: session.order?.orderNumber ?? null,
     };
   }
 
@@ -519,7 +632,6 @@ export class CheckoutService {
       );
     }
 
-    // future: webhook reconciliation - payment terminal-state harmonization in subphase 2.4
     const providerSession = await this.stripeCheckoutProvider.retrieveSession(
       session.paymentProviderSessionId,
     );
@@ -533,18 +645,65 @@ export class CheckoutService {
         HttpStatus.CONFLICT,
       );
     }
+    const finalized = await this.finalizePaidOrderFromSession({
+      session,
+      idempotencyKey: input.idempotencyKey,
+      enforceIdempotencyKeyMatch: true,
+      allowExpiredSession: false,
+      requestId,
+      source: 'return-flow',
+    });
 
-    const liveSnapshot = this.mapCartSnapshot(session.cart as CartWithItems);
+    this.logger.log({
+      event: 'order.place',
+      requestId: requestId ?? 'unknown-request-id',
+      userId: user.id,
+      orderId: finalized.order.id,
+      orderNumber: finalized.order.orderNumber,
+      idempotencyKey: input.idempotencyKey,
+      outcome: finalized.replayed ? 'replay' : 'success',
+    });
+
+    return mapOrderRecord(finalized.order);
+  }
+
+  private async finalizePaidOrderFromSession(input: {
+    session: CheckoutSessionForOrder;
+    idempotencyKey: string;
+    enforceIdempotencyKeyMatch: boolean;
+    allowExpiredSession: boolean;
+    requestId?: string;
+    source: PaymentReconciliationSource;
+  }): Promise<{ order: OrderWithItems; replayed: boolean }> {
+    if (input.session.order) {
+      if (input.enforceIdempotencyKeyMatch) {
+        this.assertIdempotencyReplayOrThrow(
+          input.session.order.placeOrderIdempotencyKey,
+          input.idempotencyKey,
+        );
+      }
+
+      return {
+        order: input.session.order,
+        replayed: true,
+      };
+    }
+
+    if (!input.allowExpiredSession) {
+      this.assertSessionIsActive(input.session);
+    }
+
+    const liveSnapshot = this.mapCartSnapshot(input.session.cart as CartWithItems);
     this.assertCartIsCheckoutReady(liveSnapshot);
 
     const now = new Date();
     const paidTransition = this.buildOrderStatusTransitionPatch('pending_payment', 'paid', now);
 
-    const createdOrder = await this.prisma.$transaction(async (transaction) => {
+    const finalized = await this.prisma.$transaction(async (transaction) => {
       const freshSession = await transaction.checkoutSession.findFirst({
         where: {
-          id: session.id,
-          userId: user.id,
+          id: input.session.id,
+          userId: input.session.userId,
         },
         include: checkoutSessionForOrderInclude,
       });
@@ -560,14 +719,22 @@ export class CheckoutService {
       }
 
       if (freshSession.order) {
-        this.assertIdempotencyReplayOrThrow(
-          freshSession.order.placeOrderIdempotencyKey,
-          input.idempotencyKey,
-        );
-        return freshSession.order;
+        if (input.enforceIdempotencyKeyMatch) {
+          this.assertIdempotencyReplayOrThrow(
+            freshSession.order.placeOrderIdempotencyKey,
+            input.idempotencyKey,
+          );
+        }
+
+        return {
+          order: freshSession.order,
+          replayed: true,
+        };
       }
 
-      this.assertSessionIsActive(freshSession);
+      if (!input.allowExpiredSession) {
+        this.assertSessionIsActive(freshSession);
+      }
 
       if (!freshSession.selectedAddress || !freshSession.contactEmail || !freshSession.contactPhone) {
         throw new HttpException(
@@ -591,7 +758,7 @@ export class CheckoutService {
       const order = await transaction.order.create({
         data: {
           orderNumber: this.generateOrderNumber(now),
-          userId: user.id,
+          userId: freshSession.userId,
           checkoutSessionId: freshSession.id,
           placeOrderIdempotencyKey: input.idempotencyKey,
           paymentProvider: 'stripe',
@@ -612,8 +779,8 @@ export class CheckoutService {
           shipToLine1: freshSession.selectedAddress.line1,
           shipToLine2: freshSession.selectedAddress.line2,
           shipToPhone: freshSession.selectedAddress.phone,
-          createdBy: user.id,
-          updatedBy: user.id,
+          createdBy: freshSession.userId,
+          updatedBy: freshSession.userId,
           // future: refunds lifecycle - placeholder schema reserved for later refund operations
           refundStatusPlaceholder: null,
           refundReasonPlaceholder: null,
@@ -646,7 +813,7 @@ export class CheckoutService {
 
       await transaction.checkoutSession.updateMany({
         where: {
-          userId: user.id,
+          userId: freshSession.userId,
           cartId: freshSession.cartId,
           isActive: true,
         },
@@ -655,20 +822,134 @@ export class CheckoutService {
         },
       });
 
-      return order;
+      return {
+        order,
+        replayed: false,
+      };
     });
 
     this.logger.log({
-      event: 'order.place',
-      requestId: requestId ?? 'unknown-request-id',
-      userId: user.id,
-      orderId: createdOrder.id,
-      orderNumber: createdOrder.orderNumber,
+      event: 'checkout.order-finalize',
+      source: input.source,
+      requestId: input.requestId ?? 'unknown-request-id',
+      userId: input.session.userId,
+      checkoutSessionId: input.session.id,
+      orderId: finalized.order.id,
+      orderNumber: finalized.order.orderNumber,
       idempotencyKey: input.idempotencyKey,
-      outcome: 'success',
+      outcome: finalized.replayed ? 'replay' : 'created',
     });
 
-    return mapOrderRecord(createdOrder);
+    return {
+      order: finalized.order,
+      replayed: finalized.replayed,
+    };
+  }
+
+  private async reconcileTerminalPaymentState(
+    session: CheckoutSessionForOrder,
+    paymentStatus: 'failed' | 'expired' | 'canceled',
+    source: PaymentReconciliationSource,
+    requestId?: string,
+  ): Promise<PaymentReconciliationResult> {
+    if (!session.order) {
+      // future: inventory reservation ledger - needed only if pre-payment stock holds are introduced
+      this.logger.log({
+        event: 'checkout.payment.reconcile-terminal',
+        source,
+        requestId: requestId ?? 'unknown-request-id',
+        provider: 'stripe',
+        providerSessionId: session.paymentProviderSessionId,
+        checkoutSessionId: session.id,
+        checkoutSessionToken: session.token,
+        paymentStatus,
+        outcome: 'no-order',
+      });
+
+      return {
+        providerSessionId: session.paymentProviderSessionId ?? 'unknown-provider-session-id',
+        checkoutSessionId: session.id,
+        checkoutSessionToken: session.token,
+        paymentStatus,
+        outcome: 'terminal_no_order',
+        orderId: null,
+        orderNumber: null,
+      };
+    }
+
+    if (session.order.status !== PrismaOrderStatus.PENDING_PAYMENT) {
+      this.logger.log({
+        event: 'checkout.payment.reconcile-terminal',
+        source,
+        requestId: requestId ?? 'unknown-request-id',
+        provider: 'stripe',
+        providerSessionId: session.paymentProviderSessionId,
+        checkoutSessionId: session.id,
+        checkoutSessionToken: session.token,
+        orderId: session.order.id,
+        orderNumber: session.order.orderNumber,
+        orderStatus: session.order.status,
+        paymentStatus,
+        outcome: 'ignored-stale',
+      });
+
+      return {
+        providerSessionId: session.paymentProviderSessionId ?? 'unknown-provider-session-id',
+        checkoutSessionId: session.id,
+        checkoutSessionToken: session.token,
+        paymentStatus,
+        outcome: 'terminal_ignored',
+        orderId: session.order.id,
+        orderNumber: session.order.orderNumber,
+      };
+    }
+
+    const now = new Date();
+    const cancelledTransition = this.buildOrderStatusTransitionPatch(
+      'pending_payment',
+      'cancelled',
+      now,
+    );
+
+    const updatedOrder = await this.prisma.order.update({
+      where: {
+        id: session.order.id,
+      },
+      data: {
+        status: cancelledTransition.status,
+        cancelledAt: cancelledTransition.cancelledAt,
+        updatedBy: session.order.updatedBy,
+      },
+      include: orderWithItemsInclude,
+    });
+
+    this.logger.log({
+      event: 'checkout.payment.reconcile-terminal',
+      source,
+      requestId: requestId ?? 'unknown-request-id',
+      provider: 'stripe',
+      providerSessionId: session.paymentProviderSessionId,
+      checkoutSessionId: session.id,
+      checkoutSessionToken: session.token,
+      orderId: updatedOrder.id,
+      orderNumber: updatedOrder.orderNumber,
+      paymentStatus,
+      outcome: 'cancelled',
+    });
+
+    return {
+      providerSessionId: session.paymentProviderSessionId ?? 'unknown-provider-session-id',
+      checkoutSessionId: session.id,
+      checkoutSessionToken: session.token,
+      paymentStatus,
+      outcome: 'terminal_applied',
+      orderId: updatedOrder.id,
+      orderNumber: updatedOrder.orderNumber,
+    };
+  }
+
+  private buildPlaceOrderIdempotencyKey(sessionToken: string, providerSessionId: string): string {
+    return `order:${sessionToken}:${providerSessionId}`;
   }
 
   private resolveBlockingReasons(
@@ -987,6 +1268,10 @@ export class CheckoutService {
     status: string | null,
     paymentStatus: string | null,
   ): CheckoutPaymentStatus {
+    if (status === 'canceled') {
+      return 'canceled';
+    }
+
     if (status === 'expired') {
       return 'expired';
     }

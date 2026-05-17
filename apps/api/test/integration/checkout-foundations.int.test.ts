@@ -389,20 +389,29 @@ class InMemoryCheckoutPrisma {
     findFirst: async (args: {
       where: {
         token?: string;
-        userId: string;
+        userId?: string;
         cartId?: string;
+        paymentProviderSessionId?: string;
         isActive?: boolean;
         expiresAt?: { gt: Date };
       };
       orderBy?: { updatedAt?: 'asc' | 'desc' };
       include?: { selectedAddress?: true };
     }) => {
-      let sessions = [...this.sessions.values()].filter((session) => session.userId === args.where.userId);
+      let sessions = [...this.sessions.values()];
+      if (args.where.userId) {
+        sessions = sessions.filter((session) => session.userId === args.where.userId);
+      }
       if (args.where.token) {
         sessions = sessions.filter((session) => session.token === args.where.token);
       }
       if (args.where.cartId) {
         sessions = sessions.filter((session) => session.cartId === args.where.cartId);
+      }
+      if (args.where.paymentProviderSessionId) {
+        sessions = sessions.filter(
+          (session) => session.paymentProviderSessionId === args.where.paymentProviderSessionId,
+        );
       }
       if (typeof args.where.isActive === 'boolean') {
         sessions = sessions.filter((session) => session.isActive === args.where.isActive);
@@ -820,7 +829,7 @@ describe('Checkout foundations (integration)', () => {
     expect(stripeMock.createdInputs).toHaveLength(1);
   });
 
-  it('maps Stripe payment status to normalized checkout payment status', async () => {
+  it('maps Stripe payment status to normalized checkout payment status for open session', async () => {
     const cookie = await getAuthCookie('checkout@shoppilot.local');
 
     const addressCreate = await fetch(`${baseUrl}/me/addresses`, {
@@ -879,8 +888,8 @@ describe('Checkout foundations (integration)', () => {
 
     stripeMock.seedSession({
       id: paymentPayload.providerSessionId,
-      status: 'complete',
-      payment_status: 'paid',
+      status: 'open',
+      payment_status: 'unpaid',
       url: `https://checkout.stripe.test/pay/${paymentPayload.providerSessionId}`,
     });
 
@@ -894,6 +903,6 @@ describe('Checkout foundations (integration)', () => {
 
     expect(statusResponse.status).toBe(200);
     const statusPayload = (await statusResponse.json()) as { status: string };
-    expect(statusPayload.status).toBe('paid');
+    expect(statusPayload.status).toBe('open');
   });
 });

@@ -512,3 +512,19 @@ test('order confirmation page renders order details for a finalized order', asyn
   await expect(page.getByRole('heading', { name: 'SP-20260517-AB12CD' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Totals' })).toBeVisible();
 });
+
+test('payment-return route shows recovery state for expired payment and can navigate back to checkout', async ({ page }) => {
+  const state = await mockCheckoutApis(page);
+  state.paymentStatus = 'expired';
+
+  await page.goto(
+    `/checkout/payment-return?sessionToken=${state.token}&providerSessionId=${state.providerSessionId}`,
+  );
+
+  await expect(page.getByRole('heading', { name: 'Payment incomplete' })).toBeVisible();
+  await expect(page.getByText('Payment was canceled or expired. Retry payment to continue.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry payment' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Back to checkout' }).click();
+  await expect(page.getByRole('heading', { name: 'Checkout' })).toBeVisible();
+});

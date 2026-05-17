@@ -8,5 +8,6 @@ import { StripeCheckoutProvider } from './stripe-checkout.provider.js';
   imports: [PrismaModule],
   controllers: [CheckoutController],
   providers: [CheckoutService, StripeCheckoutProvider],
+  exports: [CheckoutService, StripeCheckoutProvider],
 })
 export class CheckoutModule {}

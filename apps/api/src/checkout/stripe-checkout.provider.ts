@@ -72,4 +72,12 @@ export class StripeCheckoutProvider {
   async retrieveSession(sessionId: string) {
     return this.stripe.checkout.sessions.retrieve(sessionId);
   }
+
+  constructWebhookEvent(
+    rawBody: Buffer | string,
+    signatureHeader: string,
+    webhookSecret: string,
+  ): Stripe.Event {
+    return this.stripe.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret);
+  }
 }
