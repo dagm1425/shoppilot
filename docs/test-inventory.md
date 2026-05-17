@@ -92,8 +92,26 @@ Use this file to track high-value tests by phase, evidence, and latest result st
 | P2-2.3-T003 | Place-Order Failure Paths | P0 | INT | Place-order rejects mismatched idempotency replays and fails safely when transactional stock revalidation fails. | `apps/api/test/integration/checkout-orders.int.test.ts` | Yes | Passing | 2026-05-17 |
 | P2-2.3-T004 | Order Confirmation Route | P0 | E2E | `/orders/:orderNumber` renders finalized order confirmation payload (order number + totals) on customer-facing UI. | `apps/web/test/e2e/checkout.e2e.test.ts` | Yes | Passing | 2026-05-17 |
 | P2-2.3-T005 | Order Read Ownership Boundary | P0 | INT | `GET /orders/:orderNumber` returns order for owner and `ORDER_NOT_FOUND` for non-owner access attempts. | `apps/api/test/integration/checkout-orders.int.test.ts` | Yes | Passing | 2026-05-17 |
+| P2-2.4-T001 | Webhook Guardrails | P0 | UNIT | Webhook service enforces signature-required guardrail, duplicate event no-op behavior, and retry-safe failure mapping when checkout session link is missing. | `apps/api/test/unit/webhooks.service.unit.test.ts` | Yes | Passing | 2026-05-17 |
+| P2-2.4-T002 | Off-Session Paid Finalization | P0 | INT | `POST /webhooks/stripe` finalizes paid checkout server-side (order create + stock decrement + cart clear + checkout deactivate) when user never returns from Stripe. | `apps/api/test/integration/checkout-webhooks.int.test.ts` | Yes | Passing | 2026-05-17 |
+| P2-2.4-T003 | Webhook Idempotency + Stale Event Safety | P0 | INT | Duplicate webhook deliveries are replay-safe (no duplicate mutations) and stale terminal events do not downgrade already paid orders. | `apps/api/test/integration/checkout-webhooks.int.test.ts` | Yes | Passing | 2026-05-17 |
+| P2-2.4-T004 | Terminal Failure + Retry Semantics | P0 | INT | Expired/failure outcomes reconcile without duplicate order creation, and missing local-session linkage returns retryable failure with persisted FAILED event status. | `apps/api/test/integration/checkout-webhooks.int.test.ts` | Yes | Passing | 2026-05-17 |
+| P2-2.4-T005 | Payment Return Failure Recovery UI | P0 | E2E | `/checkout/payment-return` shows deterministic expired/canceled recovery state with actionable navigation back to checkout and retry affordance. | `apps/web/test/e2e/checkout.e2e.test.ts` | Yes | Passing | 2026-05-17 |
 
 ### Phase: Admin, Webhooks Expansion, and Async Jobs
+
+| ID | Category | Priority | Type | Description | Evidence (file refs) | Written | Result | Last Run |
+|---|---|---|---|---|---|---|---|---|
+| P3-3.1-T001 | Admin Route Protection | P0 | E2E | Unauthenticated user navigating to `/admin` is redirected to login and returned to `/admin` after successful sign-in. | `apps/web/test/e2e/admin-access.e2e.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.1-T002 | Admin Role Boundary | P0 | E2E | Authenticated customer is denied admin workspace access and sees explicit access-required messaging on `/admin`. | `apps/web/test/e2e/admin-access.e2e.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.1-T003 | Admin Foundation Access | P0 | E2E | Authenticated admin can access `/admin` and sees admin navigation shell links for Home, Products, and Orders. | `apps/web/test/e2e/admin-access.e2e.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.1-T004 | Admin Placeholder Routes | P0 | E2E | Authenticated admin can open `/admin/products` placeholder route and active sidebar state is set correctly. | `apps/web/test/e2e/admin-access.e2e.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.1-T005 | Admin Placeholder Authorization | P0 | E2E | Authenticated customer is blocked from `/admin/orders` placeholder route and does not see orders workspace content. | `apps/web/test/e2e/admin-access.e2e.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.2-T001 | Admin Home Data Smoke | P0 | E2E | Admin home path uses mocked `GET /orders/admin/home` summary response in route tests, providing smoke coverage for dashboard data loading path under authenticated admin access. | `apps/web/test/e2e/admin-access.e2e.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.4-T001 | Admin Orders Query Validation | P0 | UNIT | Admin orders list query parser applies defaults and rejects invalid date windows (`dateFrom > dateTo`). | `apps/api/test/unit/orders.schemas.unit.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.4-T002 | Admin Orders API Role Boundary | P0 | INT | `GET /orders/admin/list` denies customer-role tokens with `AUTH_FORBIDDEN` and enforces admin-only access. | `apps/api/test/integration/admin-orders.int.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.4-T003 | Admin Orders API Filters + Pagination | P0 | INT | Admin orders list returns newest-first pagination and supports combined status/customer/date filtering with validation failure on invalid date ranges. | `apps/api/test/integration/admin-orders.int.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.4-T004 | Admin Orders UI Flow | P0 | E2E | `/admin/orders` supports pagination navigation, combined filter apply/clear actions, and stable list rendering under mocked API responses. | `apps/web/test/e2e/admin-orders.e2e.test.ts` | Yes | Passing | 2026-05-17 |
 
 ### Phase: Vercel AI Assistant
 
