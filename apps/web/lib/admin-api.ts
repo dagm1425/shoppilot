@@ -3,12 +3,56 @@ import type {
   AdminOrdersListQuery,
   AdminOrdersListResponse,
 } from '@shoppilot/db/admin-orders-contract';
+import type {
+  AdminCreateProductInput,
+  AdminMediaPresignRequestInput,
+  AdminUpdateProductInput,
+} from './admin-product-form-schemas';
 
 type ApiError = {
   error?: {
     code?: string;
     message?: string;
     traceId?: string;
+  };
+};
+
+export type AdminMediaPresignResponse = {
+  role: 'primary' | 'secondary';
+  objectKey: string;
+  uploadUrl: string;
+  publicUrl: string;
+  expiresInSeconds: number;
+  requiredHeaders: {
+    'content-type': string;
+  };
+};
+
+export type AdminProductMutationResponse = {
+  product: {
+    productId: string;
+    name: string;
+    description: string;
+    category: 'bottoms' | 'tops';
+    gender: 'men' | 'women';
+    fit: string;
+    color: string;
+    priceCents: number;
+    currency: string;
+    available: boolean;
+    stock: number;
+    primaryImageUrl: string;
+    secondaryImageUrl: string | null;
+    media: Array<{
+      role: 'primary' | 'secondary';
+      objectKey: string;
+      url: string;
+      contentType: string;
+      sizeBytes: number;
+      altText: string | null;
+    }>;
+    createdAt: string;
+    updatedAt: string;
   };
 };
 
@@ -80,6 +124,30 @@ export function getAdminOrdersErrorMessage(message: string, code?: string): stri
   return getAdminHomeErrorMessage(message, code);
 }
 
+export function getAdminProductsErrorMessage(message: string, code?: string): string {
+  if (code === 'PRODUCT_VALIDATION_ERROR') {
+    return 'One or more product fields are invalid.';
+  }
+
+  if (code === 'PRODUCT_MEDIA_TOO_LARGE') {
+    return 'Media file is too large for upload.';
+  }
+
+  if (code === 'PRODUCT_MEDIA_CONTENT_TYPE_UNSUPPORTED') {
+    return 'Unsupported media file type. Use JPEG, PNG, or WebP.';
+  }
+
+  if (code === 'PRODUCT_SLUG_CONFLICT') {
+    return 'A product with this slug already exists.';
+  }
+
+  if (code === 'PRODUCT_MEDIA_NOT_CONFIGURED') {
+    return 'Media upload is not configured for this environment yet.';
+  }
+
+  return getAdminHomeErrorMessage(message, code);
+}
+
 export async function fetchAdminHomeSummary() {
   const response = await fetch(`${getApiBase()}/orders/admin/home`, {
     credentials: 'include',
@@ -122,4 +190,59 @@ export async function fetchAdminOrdersList(query: AdminOrdersListQuery) {
   });
 
   return parseResponse<AdminOrdersListResponse>(response);
+}
+
+export async function presignAdminProductMedia(input: AdminMediaPresignRequestInput) {
+  const response = await fetch(`${getApiBase()}/products/admin/media/presign`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  return parseResponse<AdminMediaPresignResponse>(response);
+}
+
+export async function uploadAdminProductMediaFile(input: {
+  uploadUrl: string;
+  contentType: string;
+  file: File;
+}) {
+  const response = await fetch(input.uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'content-type': input.contentType,
+    },
+    body: input.file,
+  });
+
+  return response.ok;
+}
+
+export async function createAdminProduct(input: AdminCreateProductInput) {
+  const response = await fetch(`${getApiBase()}/products/admin`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  return parseResponse<AdminProductMutationResponse>(response);
+}
+
+export async function updateAdminProduct(productId: string, input: AdminUpdateProductInput) {
+  const response = await fetch(`${getApiBase()}/products/admin/${encodeURIComponent(productId)}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  return parseResponse<AdminProductMutationResponse>(response);
 }

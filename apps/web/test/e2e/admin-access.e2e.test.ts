@@ -358,7 +358,7 @@ test('allows authenticated admin to access admin route', async ({ page }) => {
   await expect(page.locator("a[href='/admin/orders']")).toBeVisible();
 });
 
-test('allows authenticated admin to access products placeholder route', async ({ page }) => {
+test('allows authenticated admin to access products workspace route', async ({ page }) => {
   await page.route('**/auth/**', async (route) => {
     const url = route.request().url();
     const parsedUrl = new URL(url);
@@ -402,7 +402,7 @@ test('allows authenticated admin to access products placeholder route', async ({
   await waitForClientHydration(page);
 
   await expect(page).toHaveURL(/\/admin\/products$/, { timeout: 20_000 });
-  await expect(page.getByText('Products workspace')).toBeVisible();
+  await expect(page.getByText('Create and update catalog products')).toBeVisible();
   await expect(page.locator("a[href='/admin/products']")).toHaveAttribute('aria-current', 'page');
 });
 

@@ -7,11 +7,13 @@ import { ApiErrorFilter } from '../../src/common/api-error.filter.js';
 import { requestContextMiddleware } from '../../src/common/request-context.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
 import { StripeCheckoutProvider } from '../../src/checkout/stripe-checkout.provider.js';
+import { ProductMediaStorageService } from '../../src/products/product-media-storage.service.js';
 
 export async function createTestApp(options?: {
   prismaService?: Partial<PrismaService>;
   passwordResetMailerService?: Partial<PasswordResetMailerService>;
   stripeCheckoutProvider?: Partial<StripeCheckoutProvider>;
+  productMediaStorageService?: Partial<ProductMediaStorageService>;
 }): Promise<INestApplication> {
   const builder = Test.createTestingModule({
     imports: [AppModule],
@@ -31,6 +33,12 @@ export async function createTestApp(options?: {
     builder
       .overrideProvider(StripeCheckoutProvider)
       .useValue(options.stripeCheckoutProvider);
+  }
+
+  if (options?.productMediaStorageService) {
+    builder
+      .overrideProvider(ProductMediaStorageService)
+      .useValue(options.productMediaStorageService);
   }
 
   const testingModule = await builder.compile();

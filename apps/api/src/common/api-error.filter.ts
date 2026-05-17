@@ -121,6 +121,10 @@ export class ApiErrorFilter implements ExceptionFilter {
         return 'AUTH_UNAUTHORIZED';
       }
 
+      if (path.startsWith('/products/admin') && status === HttpStatus.UNAUTHORIZED) {
+        return 'AUTH_UNAUTHORIZED';
+      }
+
       if (path.startsWith('/me/addresses') && status === HttpStatus.UNAUTHORIZED) {
         return 'AUTH_UNAUTHORIZED';
       }
@@ -132,6 +136,10 @@ export class ApiErrorFilter implements ExceptionFilter {
   }
 
   private resolvePhase(path: string): string {
+    if (path.startsWith('/products/admin')) {
+      return 'phase-3.3';
+    }
+
     if (path.startsWith('/auth')) {
       return 'phase-1.1';
     }

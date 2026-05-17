@@ -29,3 +29,11 @@ export const DEFAULT_CATALOG_PAGE_SIZE = 12;
 export const MIN_CATALOG_PAGE_SIZE = 1;
 export const MAX_CATALOG_PAGE_SIZE = 36;
 export const MAX_SEARCH_QUERY_LENGTH = 120;
+
+export const productMediaRoleValues = ['primary', 'secondary'] as const;
+export const productMediaContentTypeValues = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export const MAX_PRODUCT_MEDIA_OBJECT_KEY_LENGTH = 320;
+export const MAX_PRODUCT_MEDIA_URL_LENGTH = 2_048;
+export const MAX_PRODUCT_MEDIA_ALT_TEXT_LENGTH = 180;
+export const MAX_PRODUCT_TEXT_FIELD_LENGTH = 160;
+export const MAX_PRODUCT_DESCRIPTION_LENGTH = 2_000;

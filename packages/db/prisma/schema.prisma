@@ -99,6 +99,7 @@ model Product {
   stock             Int             @default(0)
   primaryImageUrl   String
   secondaryImageUrl String?
+  media             ProductMedia[]
   cartItems         CartItem[]
   wishlistItems     WishlistItem[]
   orderLineItems    OrderLineItem[]
@@ -109,6 +110,24 @@ model Product {
   @@index([gender, category, createdAt], map: "products_gender_category_created_at_idx")
   @@index([name], map: "products_name_idx")
   @@map("products")
+}
+
+model ProductMedia {
+  id          String           @id @default(cuid())
+  productId   String
+  product     Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  role        ProductMediaRole
+  objectKey   String           @unique
+  url         String
+  contentType String
+  sizeBytes   Int
+  altText     String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([productId, role], map: "product_media_product_id_role_key")
+  @@index([productId], map: "product_media_product_id_idx")
+  @@map("product_media")
 }
 
 model Cart {
@@ -331,6 +350,11 @@ enum ProductSize {
   M
   L
   XL
+}
+
+enum ProductMediaRole {
+  PRIMARY
+  SECONDARY
 }
 
 enum OrderStatus {

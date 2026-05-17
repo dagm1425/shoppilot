@@ -31,11 +31,32 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_WEB_SUCCESS_URL: z.string().url().optional(),
   STRIPE_WEB_CANCEL_URL: z.string().url().optional(),
+  PRODUCT_MEDIA_S3_BUCKET: z.string().min(1).optional(),
+  PRODUCT_MEDIA_S3_REGION: z.string().min(1).optional(),
+  PRODUCT_MEDIA_PUBLIC_BASE_URL: z.string().url().optional(),
+  PRODUCT_MEDIA_PRESIGN_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  PRODUCT_MEDIA_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(5_242_880),
+  PRODUCT_MEDIA_OBJECT_PREFIX: z.string().trim().min(1).default('products'),
   EMAIL_FROM_ADDRESS: z.string().email().default('onboarding@resend.dev'),
   EMAIL_FROM_NAME: z.string().min(1).default('ShopPilot'),
   EMAIL_RESET_BASE_URL: z.string().url().default('http://localhost:3000/reset-password'),
   RESEND_API_KEY: z.string().min(1, 'RESEND_API_KEY is required.'),
 }).superRefine((input, context) => {
+  const hasMediaBucket =
+    typeof input.PRODUCT_MEDIA_S3_BUCKET === 'string' &&
+    input.PRODUCT_MEDIA_S3_BUCKET.trim().length > 0;
+  const hasMediaRegion =
+    typeof input.PRODUCT_MEDIA_S3_REGION === 'string' &&
+    input.PRODUCT_MEDIA_S3_REGION.trim().length > 0;
+
+  if (hasMediaBucket !== hasMediaRegion) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['PRODUCT_MEDIA_S3_BUCKET'],
+      message: 'PRODUCT_MEDIA_S3_BUCKET and PRODUCT_MEDIA_S3_REGION must be provided together.',
+    });
+  }
+
   if (input.SENTRY_ENABLED !== 'true') {
     return;
   }

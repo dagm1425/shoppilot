@@ -12,7 +12,7 @@ type AdminNavItem = {
 
 const navItems: AdminNavItem[] = [
   { href: '/admin', label: 'Home' },
-  { href: '/admin/products', label: 'Products', placeholder: true },
+  { href: '/admin/products', label: 'Products' },
   { href: '/admin/orders', label: 'Orders', placeholder: true },
 ];
 
