@@ -29,7 +29,7 @@ function mapProductSize(size: ProductSize): OrderLineItemSnapshot['size'] {
   }
 }
 
-function mapOrderStatus(status: PrismaOrderStatus): OrderStatus {
+export function mapOrderStatus(status: PrismaOrderStatus): OrderStatus {
   switch (status) {
     case PrismaOrderStatus.PAID:
       return 'paid';
@@ -46,6 +46,26 @@ function mapOrderStatus(status: PrismaOrderStatus): OrderStatus {
     case PrismaOrderStatus.PENDING_PAYMENT:
     default:
       return 'pending_payment';
+  }
+}
+
+export function mapOrderStatusToPrisma(status: OrderStatus): PrismaOrderStatus {
+  switch (status) {
+    case 'paid':
+      return PrismaOrderStatus.PAID;
+    case 'processing':
+      return PrismaOrderStatus.PROCESSING;
+    case 'shipped':
+      return PrismaOrderStatus.SHIPPED;
+    case 'delivered':
+      return PrismaOrderStatus.DELIVERED;
+    case 'cancelled':
+      return PrismaOrderStatus.CANCELLED;
+    case 'refunded':
+      return PrismaOrderStatus.REFUNDED;
+    case 'pending_payment':
+    default:
+      return PrismaOrderStatus.PENDING_PAYMENT;
   }
 }
 

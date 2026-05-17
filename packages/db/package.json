@@ -33,6 +33,14 @@
     "./order-contract": {
       "types": "./dist/order-contract.d.ts",
       "default": "./dist/order-contract.js"
+    },
+    "./admin-dashboard-contract": {
+      "types": "./dist/admin-dashboard-contract.d.ts",
+      "default": "./dist/admin-dashboard-contract.js"
+    },
+    "./admin-orders-contract": {
+      "types": "./dist/admin-orders-contract.d.ts",
+      "default": "./dist/admin-orders-contract.js"
     }
   },
   "scripts": {
