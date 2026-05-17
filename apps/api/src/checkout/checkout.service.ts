@@ -23,6 +23,7 @@ import type { AuthenticatedRequestUser } from '../auth/auth.types.js';
 import { parseEnv } from '../config/env.js';
 import { mapOrderRecord, orderWithItemsInclude, type OrderWithItems } from '../orders/orders.mapper.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { OrderConfirmationEmailQueueService } from './order-confirmation-email.queue.service.js';
 import { StripeCheckoutProvider } from './stripe-checkout.provider.js';
 
 const cartWithItemsInclude = {
@@ -108,6 +109,8 @@ export class CheckoutService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(StripeCheckoutProvider) private readonly stripeCheckoutProvider: StripeCheckoutProvider,
+    @Inject(OrderConfirmationEmailQueueService)
+    private readonly orderConfirmationEmailQueueService: OrderConfirmationEmailQueueService,
   ) {}
 
   async startSession(
@@ -838,6 +841,17 @@ export class CheckoutService {
       orderNumber: finalized.order.orderNumber,
       idempotencyKey: input.idempotencyKey,
       outcome: finalized.replayed ? 'replay' : 'created',
+    });
+
+    await this.orderConfirmationEmailQueueService.enqueueOrderConfirmationEmail({
+      orderId: finalized.order.id,
+      orderNumber: finalized.order.orderNumber,
+      recipientEmail: finalized.order.contactEmail,
+      totalCents: finalized.order.totalCents,
+      currency: finalized.order.currency,
+      paidAtIso: finalized.order.paidAt?.toISOString() ?? now.toISOString(),
+      requestId: input.requestId,
+      source: input.source,
     });
 
     return {

@@ -174,6 +174,9 @@ export function OrderConfirmationContent({ orderNumber }: OrderConfirmationConte
           <p className="mt-1 text-sm text-muted-foreground">
             Created: {new Date(order.createdAt).toLocaleString('en-US')}
           </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Confirmation email delivery can take up to a minute.
+          </p>
         </section>
 
         <section className="border-b border-border pb-6">
