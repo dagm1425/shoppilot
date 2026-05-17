@@ -256,9 +256,20 @@ export function AuthForm({ mode, postLoginRedirect = null }: AuthFormProps) {
       <button
         type="submit"
         disabled={loading}
+        aria-busy={loading}
         className="mt-6 inline-flex min-h-[3.25rem] w-full items-center justify-center rounded-pill bg-auth-button px-4 py-2 font-auth-heading text-sm font-bold uppercase tracking-[0.08em] text-auth-button-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-70"
       >
-        {loading ? 'Submitting...' : mode === 'login' ? 'Sign in' : 'Create account'}
+        {loading ? (
+          <span className="inline-flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+            />
+            <span>{mode === 'login' ? 'Sign in' : 'Create account'}</span>
+          </span>
+        ) : (
+          mode === 'login' ? 'Sign in' : 'Create account'
+        )}
       </button>
 
       {mode === 'login' ? (
