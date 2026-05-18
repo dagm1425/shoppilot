@@ -63,6 +63,7 @@ class AssistantTools:
             semantic_query=parsed_intent.semantic_query,
             top_k=payload.top_k,
         )
+        # future: llm response synthesis - handled in Phase 4.3 graph final-response stage
 
         return SearchItemsToolOutput(
             retrieval_mode=retrieval.mode,

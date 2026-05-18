@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.graph.workflow import AssistantGraphWorkflow
+from app.llm.synthesizer import AssistantSynthesisResult
 from app.schemas import (
     ChatRequest,
     CompareItemsToolOutput,
@@ -54,6 +55,44 @@ class _StubTools:
             summary='Compared selected products.',
             compared_items=compared_items,
         )
+
+
+class _StubSynthesizer:
+    def __init__(
+        self,
+        *,
+        enabled: bool = False,
+        result: AssistantSynthesisResult | None = None,
+        should_raise: bool = False,
+    ) -> None:
+        self.enabled = enabled
+        self.result = result
+        self.should_raise = should_raise
+        self.calls: list[dict[str, object]] = []
+
+    def synthesize(
+        self,
+        *,
+        query: str,
+        retrieval_mode: str | None,
+        normalized_filters: dict[str, object],
+        retrieved_products: list[dict[str, object]],
+        comparison_summary: str | None,
+    ) -> AssistantSynthesisResult:
+        self.calls.append(
+            {
+                'query': query,
+                'retrieval_mode': retrieval_mode,
+                'normalized_filters': normalized_filters,
+                'retrieved_products': retrieved_products,
+                'comparison_summary': comparison_summary,
+            }
+        )
+        if self.should_raise:
+            raise RuntimeError('synthetic synthesis failure')
+        if self.result is None:
+            raise RuntimeError('stub synthesis result missing')
+        return self.result
 
 
 def _chat_payload(
@@ -117,7 +156,11 @@ def test_workflow_run_returns_structured_recommendations() -> None:
             second.product_id: second,
         },
     )
-    workflow = AssistantGraphWorkflow(tools=tools, model_name='gpt-4.1-mini')
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        model_name='gpt-4.1-mini',
+    )
 
     response = workflow.run(
         _chat_payload(
@@ -141,7 +184,11 @@ def test_workflow_retry_path_is_bounded_to_single_retry() -> None:
     tools = _StubTools(
         search_plan=[RuntimeError('temporary failure'), RuntimeError('still failing')],
     )
-    workflow = AssistantGraphWorkflow(tools=tools, model_name='gpt-4.1-mini')
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        model_name='gpt-4.1-mini',
+    )
 
     response = workflow.run(
         _chat_payload(
@@ -182,7 +229,11 @@ def test_workflow_reuses_memory_for_same_thread_compare_follow_up() -> None:
             second.product_id: second,
         },
     )
-    workflow = AssistantGraphWorkflow(tools=tools, model_name='gpt-4.1-mini')
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        model_name='gpt-4.1-mini',
+    )
 
     first_turn = workflow.run(
         _chat_payload(
@@ -233,7 +284,11 @@ def test_workflow_isolates_memory_between_sessions() -> None:
             second.product_id: second,
         },
     )
-    workflow = AssistantGraphWorkflow(tools=tools, model_name='gpt-4.1-mini')
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        model_name='gpt-4.1-mini',
+    )
 
     workflow.run(
         _chat_payload(
@@ -256,3 +311,80 @@ def test_workflow_isolates_memory_between_sessions() -> None:
     assert isolated_turn.recommended_product_ids == []
     assert tools.search_calls == 2
     assert tools.compare_calls == []
+
+
+def test_workflow_applies_llm_synthesis_when_available() -> None:
+    first = _product(
+        product_id='essential-cropped-tee',
+        name='Essential Cropped Tee',
+        category='tops',
+        price_cents=2400,
+    )
+    tools = _StubTools(
+        search_plan=[_search_output(retrieval_mode='structured', items=[first])],
+        product_map={first.product_id: first},
+    )
+    synthesizer = _StubSynthesizer(
+        enabled=True,
+        result=AssistantSynthesisResult(
+            assistant_message='Top match: Essential Cropped Tee for breathable training.',
+            follow_up_prompts=['Need lower-priced options?', 'Want only in-stock picks?'],
+            comparison_summary=None,
+        ),
+    )
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=synthesizer,
+        model_name='gpt-4.1-mini',
+    )
+
+    response = workflow.run(
+        _chat_payload(
+            message='show available workout tops under 50 dollars',
+            session_id='session-llm-1',
+            request_id='request-llm-1',
+            user_id='user-1',
+        )
+    )
+
+    assert response.assistant_message == 'Top match: Essential Cropped Tee for breathable training.'
+    assert response.follow_up_prompts == [
+        'Need lower-priced options?',
+        'Want only in-stock picks?',
+    ]
+    assert len(synthesizer.calls) == 1
+    assert synthesizer.calls[0]['retrieval_mode'] == 'structured'
+
+
+def test_workflow_keeps_deterministic_output_when_synthesis_fails() -> None:
+    first = _product(
+        product_id='essential-cropped-tee',
+        name='Essential Cropped Tee',
+        category='tops',
+        price_cents=2400,
+    )
+    tools = _StubTools(
+        search_plan=[_search_output(retrieval_mode='structured', items=[first])],
+        product_map={first.product_id: first},
+    )
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=True, should_raise=True),
+        model_name='gpt-4.1-mini',
+    )
+
+    response = workflow.run(
+        _chat_payload(
+            message='show available workout tops under 50 dollars',
+            session_id='session-llm-fallback',
+            request_id='request-llm-fallback',
+            user_id='user-1',
+        )
+    )
+
+    assert response.placeholder is False
+    assert 'matching products using structured retrieval' in response.assistant_message
+    assert response.follow_up_prompts == [
+        'Want options in a different price range?',
+        'Should I focus on in-stock items only?',
+    ]

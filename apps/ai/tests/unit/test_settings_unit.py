@@ -58,3 +58,36 @@ def test_settings_require_sentry_dsn_when_enabled(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(ValidationError):
         AppSettings(_env_file=None)
+
+
+def test_settings_apply_llm_synthesis_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.ai_llm_synthesis_enabled is True
+    assert settings.ai_llm_synthesis_timeout_ms == 8000
+    assert settings.ai_llm_synthesis_max_tokens == 220
+    assert settings.ai_llm_synthesis_temperature == 0.2
+    assert settings.ai_llm_synthesis_top_n_products == 3
+
+
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    [
+        ('AI_LLM_SYNTHESIS_TIMEOUT_MS', '500'),
+        ('AI_LLM_SYNTHESIS_MAX_TOKENS', '999'),
+        ('AI_LLM_SYNTHESIS_TEMPERATURE', '1.5'),
+        ('AI_LLM_SYNTHESIS_TOP_N_PRODUCTS', '0'),
+    ],
+)
+def test_settings_reject_invalid_llm_synthesis_ranges(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv(field, value)
+
+    with pytest.raises(ValidationError):
+        AppSettings(_env_file=None)

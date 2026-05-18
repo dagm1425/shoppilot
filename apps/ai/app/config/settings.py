@@ -24,6 +24,31 @@ class AppSettings(BaseSettings):
     )
     ai_search_top_k: int = Field(default=5, ge=1, le=20, validation_alias='AI_SEARCH_TOP_K')
     ai_hybrid_candidate_limit: int = Field(default=200, ge=1, le=5000, validation_alias='AI_HYBRID_CANDIDATE_LIMIT')
+    ai_llm_synthesis_enabled: bool = Field(default=True, validation_alias='AI_LLM_SYNTHESIS_ENABLED')
+    ai_llm_synthesis_timeout_ms: int = Field(
+        default=8000,
+        ge=1000,
+        le=30000,
+        validation_alias='AI_LLM_SYNTHESIS_TIMEOUT_MS',
+    )
+    ai_llm_synthesis_max_tokens: int = Field(
+        default=220,
+        ge=64,
+        le=800,
+        validation_alias='AI_LLM_SYNTHESIS_MAX_TOKENS',
+    )
+    ai_llm_synthesis_temperature: float = Field(
+        default=0.2,
+        ge=0,
+        le=1,
+        validation_alias='AI_LLM_SYNTHESIS_TEMPERATURE',
+    )
+    ai_llm_synthesis_top_n_products: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        validation_alias='AI_LLM_SYNTHESIS_TOP_N_PRODUCTS',
+    )
     ai_index_batch_size: int = Field(default=25, ge=1, le=200, validation_alias='AI_INDEX_BATCH_SIZE')
     ai_index_version: str = Field(default='phase4-v1', min_length=1, validation_alias='AI_INDEX_VERSION')
     chroma_persist_directory: str = Field(

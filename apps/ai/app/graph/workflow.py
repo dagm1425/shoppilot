@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -13,6 +14,7 @@ try:
 except ImportError:  # pragma: no cover - compatibility for pre-rename releases
     from langgraph.checkpoint.memory import InMemorySaver as MemorySaver
 
+from app.llm.synthesizer import AssistantSynthesizer
 from app.observability import capture_sentry_exception
 from app.schemas import (
     AgentState,
@@ -58,8 +60,15 @@ class AssistantGraphState(TypedDict, total=False):
 
 
 class AssistantGraphWorkflow:
-    def __init__(self, *, tools: AssistantTools, model_name: str) -> None:
+    def __init__(
+        self,
+        *,
+        tools: AssistantTools,
+        synthesizer: AssistantSynthesizer,
+        model_name: str,
+    ) -> None:
         self._tools = tools
+        self._synthesizer = synthesizer
         self._model_name = model_name
         self._graph = _compile_graph(self)
 
@@ -305,14 +314,81 @@ class AssistantGraphWorkflow:
             f"{state.get('retrieval_mode', 'semantic')} retrieval. "
             'These options are ranked from your current request.'
         )
+        follow_up_prompts = [
+            'Want options in a different price range?',
+            'Should I focus on in-stock items only?',
+        ]
+
+        if not self._synthesizer.enabled:
+            logger.info(
+                {
+                    'event': 'ai.llm_synthesis_fallback',
+                    'request_id': state['request_id'],
+                    'thread_id': state['thread_id'],
+                    'ai_retrieval_mode': state.get('retrieval_mode'),
+                    'latency_ms': 0,
+                    'fallback_reason': 'disabled',
+                },
+            )
+        else:
+            started_at = perf_counter()
+            logger.info(
+                {
+                    'event': 'ai.llm_synthesis_started',
+                    'request_id': state['request_id'],
+                    'thread_id': state['thread_id'],
+                    'ai_retrieval_mode': state.get('retrieval_mode'),
+                },
+            )
+
+            try:
+                synthesis = self._synthesizer.synthesize(
+                    query=state['query'],
+                    retrieval_mode=state.get('retrieval_mode'),
+                    normalized_filters=state.get('normalized_filters', {}),
+                    retrieved_products=retrieved_products,
+                    comparison_summary=comparison_summary,
+                )
+                assistant_message = synthesis.assistant_message
+                if synthesis.follow_up_prompts:
+                    follow_up_prompts = synthesis.follow_up_prompts
+                if state.get('comparison_requested') and synthesis.comparison_summary:
+                    comparison_summary = synthesis.comparison_summary
+            except Exception as exc:
+                capture_sentry_exception(
+                    exc,
+                    tags={
+                        'ai_component': 'llm_synthesis',
+                        'request_id': state['request_id'],
+                        'thread_id': state['thread_id'],
+                        'ai_retrieval_mode': str(state.get('retrieval_mode')),
+                    },
+                )
+                logger.warning(
+                    {
+                        'event': 'ai.llm_synthesis_fallback',
+                        'request_id': state['request_id'],
+                        'thread_id': state['thread_id'],
+                        'ai_retrieval_mode': state.get('retrieval_mode'),
+                        'latency_ms': int((perf_counter() - started_at) * 1000),
+                        'fallback_reason': type(exc).__name__,
+                    },
+                )
+            else:
+                logger.info(
+                    {
+                        'event': 'ai.llm_synthesis_completed',
+                        'request_id': state['request_id'],
+                        'thread_id': state['thread_id'],
+                        'ai_retrieval_mode': state.get('retrieval_mode'),
+                        'latency_ms': int((perf_counter() - started_at) * 1000),
+                    },
+                )
 
         return {
             'terminal_status': 'success',
             'assistant_message': assistant_message,
-            'follow_up_prompts': [
-                'Want options in a different price range?',
-                'Should I focus on in-stock items only?',
-            ],
+            'follow_up_prompts': follow_up_prompts,
             'retrieved_products': retrieved_products,
             'recommended_product_ids': recommended_ids,
             'comparison_summary': comparison_summary,
