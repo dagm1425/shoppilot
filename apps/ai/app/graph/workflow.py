@@ -13,7 +13,7 @@ try:
 except ImportError:  # pragma: no cover - compatibility for pre-rename releases
     from langgraph.checkpoint.memory import InMemorySaver as MemorySaver
 
-from app.observability import capture_exception_if_configured
+from app.observability import capture_sentry_exception
 from app.schemas import (
     AgentState,
     ChatRequest,
@@ -86,7 +86,7 @@ class AssistantGraphWorkflow:
         try:
             state = self._graph.invoke(initial_state, config=config)
         except Exception as exc:
-            capture_exception_if_configured(
+            capture_sentry_exception(
                 exc,
                 tags={
                     'ai_assistant_request': 'true',
@@ -172,7 +172,7 @@ class AssistantGraphWorkflow:
                 'tool_output': {},
             }
         except Exception as exc:
-            capture_exception_if_configured(
+            capture_sentry_exception(
                 exc,
                 tags={
                     'ai_assistant_request': 'true',

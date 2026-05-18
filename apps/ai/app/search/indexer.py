@@ -4,7 +4,7 @@ import logging
 from time import perf_counter
 
 from app.config.settings import AppSettings
-from app.observability import capture_exception_if_configured
+from app.observability import capture_sentry_exception
 from app.search.embeddings import EmbeddingClient
 from app.search.repository import ProductRepository
 from app.search.text_builder import build_embedding_text
@@ -58,7 +58,7 @@ def rebuild_product_index(settings: AppSettings) -> int:
 
         return indexed_count
     except Exception as exc:
-        capture_exception_if_configured(exc)
+        capture_sentry_exception(exc)
         logger.exception(
             {
                 'event': 'ai.index_rebuild_failed',

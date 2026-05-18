@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.config.settings import AppSettings
-from app.observability import capture_exception_if_configured
+from app.observability import capture_sentry_exception
 from app.search.constants import RETRIEVAL_MODE_HYBRID, RETRIEVAL_MODE_SEMANTIC
 from app.search.embeddings import EmbeddingClient
 from app.search.models import (
@@ -49,7 +49,7 @@ class SemanticSearchService:
 
             return self._structured_retrieval(intent, top_k=resolved_top_k)
         except Exception as exc:
-            capture_exception_if_configured(exc)
+            capture_sentry_exception(exc)
             raise
 
     def retrieve_with_plan(

@@ -1,3 +1,3 @@
-from .sentry import capture_exception_if_configured, initialize_sentry
+from .sentry import capture_sentry_exception, initialize_sentry
 
-__all__ = ['initialize_sentry', 'capture_exception_if_configured']
+__all__ = ['initialize_sentry', 'capture_sentry_exception']

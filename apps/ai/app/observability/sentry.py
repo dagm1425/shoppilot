@@ -41,7 +41,7 @@ def initialize_sentry(settings: AppSettings) -> None:
     )
 
 
-def capture_exception_if_configured(
+def capture_sentry_exception(
     exc: Exception,
     *,
     tags: Mapping[str, str] | None = None,
