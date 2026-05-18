@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -72,6 +74,27 @@ def _no_result_response() -> ChatResponse:
         model='workflow-model',
         placeholder=False,
     )
+
+
+def _parse_sse_events(raw_payload: str) -> list[tuple[str, dict[str, object]]]:
+    events: list[tuple[str, dict[str, object]]] = []
+
+    for block in raw_payload.strip().split('\n\n'):
+        lines = [line.strip() for line in block.split('\n') if line.strip() != '']
+        if len(lines) < 2:
+            continue
+
+        event_line = next((line for line in lines if line.startswith('event: ')), None)
+        data_line = next((line for line in lines if line.startswith('data: ')), None)
+
+        if not event_line or not data_line:
+            continue
+
+        event_name = event_line.replace('event: ', '', 1).strip()
+        payload = json.loads(data_line.replace('data: ', '', 1))
+        events.append((event_name, payload))
+
+    return events
 
 
 def test_chat_returns_typed_recommendation_response(
@@ -191,3 +214,82 @@ def test_chat_versioned_route_returns_same_contract(
     assert payload['sessionId'] == 'session-2'
     assert payload['placeholder'] is False
     assert payload['recommendedProductIds'] == ['essential-cropped-tee', 'flow-sports-bra']
+
+
+def test_chat_stream_returns_ordered_ag_ui_text_events(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_workflow = _StubWorkflow(_recommended_response())
+    monkeypatch.setattr(
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: stub_workflow,
+    )
+
+    response = client.post(
+        '/ai/chat/stream',
+        json={
+            'message': 'Recommend running tops',
+            'sessionId': 'session-stream',
+            'userContext': {'userId': 'user-1'},
+            'requestId': 'request-stream-1',
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get('content-type', '').startswith('text/event-stream')
+    assert response.headers.get('x-request-id') == 'request-stream-1'
+
+    events = _parse_sse_events(response.text)
+    event_names = [event_name for event_name, _payload in events]
+
+    assert event_names[0] == 'RUN_STARTED'
+    assert event_names[1] == 'TEXT_MESSAGE_START'
+    assert 'TEXT_MESSAGE_CONTENT' in event_names
+    assert event_names[-2] == 'TEXT_MESSAGE_END'
+    assert event_names[-1] == 'RUN_FINISHED'
+
+    for event_name, payload in events:
+        assert payload['type'] == event_name
+
+
+def test_chat_stream_emits_run_error_event_on_failure(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingWorkflow:
+        def run(self, _payload: ChatRequest) -> ChatResponse:
+            raise RuntimeError('graph failed')
+
+    monkeypatch.setattr(
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: _FailingWorkflow(),
+    )
+
+    response = client.post(
+        '/ai/chat/stream',
+        json={
+            'message': 'Recommend running tops',
+            'sessionId': 'session-stream-error',
+            'userContext': {'userId': 'user-1'},
+            'requestId': 'request-stream-2',
+        },
+    )
+
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+    assert len(events) == 1
+    assert events[0][0] == 'RUN_ERROR'
+    assert events[0][1]['type'] == 'RUN_ERROR'
+    assert events[0][1]['code'] == 'AI_INTERNAL_ERROR'
+
+
+def test_chat_stream_invalid_payload_returns_typed_validation_error(client: TestClient) -> None:
+    response = client.post('/ai/chat/stream', json={'message': ''})
+
+    assert response.status_code == 422
+    assert response.headers.get('x-request-id')
+    payload = response.json()
+
+    assert payload['error']['code'] == 'AI_VALIDATION_ERROR'
+    assert payload['error']['message'] == 'Request validation failed.'

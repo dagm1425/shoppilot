@@ -21,8 +21,15 @@ def get_request_id_from_request(request: Request) -> str:
 
 async def attach_request_id_middleware(request: Request, call_next):
     inbound = request.headers.get(REQUEST_ID_HEADER)
-    request.state.request_id = inbound.strip() if inbound and inbound.strip() else str(uuid4())
+    normalized_inbound = inbound.strip() if inbound and inbound.strip() else None
+    request.state.request_id = normalized_inbound or str(uuid4())
 
     response: Response = await call_next(request)
-    response.headers[REQUEST_ID_HEADER] = request.state.request_id
+    # Preserve externally supplied correlation ids when present.
+    if normalized_inbound:
+        response.headers[REQUEST_ID_HEADER] = normalized_inbound
+    # Otherwise keep route-provided ids (for example payload requestId) and
+    # only backfill from middleware state when the header is absent.
+    elif not response.headers.get(REQUEST_ID_HEADER):
+        response.headers[REQUEST_ID_HEADER] = request.state.request_id
     return response
