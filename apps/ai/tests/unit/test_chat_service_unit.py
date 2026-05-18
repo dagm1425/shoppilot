@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-from app.schemas import ChatRequest
-from app.search.constants import RETRIEVAL_MODE_STRUCTURED
-from app.search.models import ProductRecord, RetrievalFilters, RetrievalResult, SearchHit
+from app.schemas import ChatRequest, ChatResponse, FinalRecommendation, ProductItem
 from app.services.chat_service import build_chat_response, build_placeholder_response
 
 
-class _StubSearchService:
-    def __init__(self, result: RetrievalResult) -> None:
-        self._result = result
+class _StubWorkflow:
+    def __init__(self, response: ChatResponse) -> None:
+        self._response = response
+        self.calls: list[ChatRequest] = []
 
-    def retrieve(self, _: str) -> RetrievalResult:
-        return self._result
+    def run(self, payload: ChatRequest) -> ChatResponse:
+        self.calls.append(payload)
+        return self._response.model_copy(deep=True)
 
 
 def _payload() -> ChatRequest:
@@ -27,21 +25,35 @@ def _payload() -> ChatRequest:
     )
 
 
-def _product(*, product_id: str, name: str, category: str, price_cents: int) -> ProductRecord:
-    return ProductRecord(
-        product_id=product_id,
-        name=name,
-        description=f'{name} description',
-        category=category,
-        gender='women',
-        fit='regular',
-        color='black',
-        price_cents=price_cents,
+def _recommended_response() -> ChatResponse:
+    product = ProductItem(
+        product_id='essential-cropped-tee',
+        name='Essential Cropped Tee',
+        category='tops',
+        price_cents=2400,
         currency='USD',
         available=True,
-        rating=4.4,
-        stock=10,
-        updated_at=datetime.now(timezone.utc),
+        rating=4.7,
+        short_description='Soft cropped tee',
+    )
+
+    recommendation = FinalRecommendation(
+        summary='Great match for breathable training.',
+        recommended_products=[product],
+        comparison_summary='Top match confidence: 0.95',
+        follow_up_prompts=['Need a lower price option?'],
+    )
+
+    return ChatResponse(
+        request_id='request-1',
+        session_id='session-1',
+        assistant_message='I found one strong option for your request.',
+        recommendations=[recommendation],
+        recommended_product_ids=['essential-cropped-tee'],
+        retrieval_mode='hybrid',
+        follow_up_prompts=['Need a lower price option?'],
+        model='workflow-model',
+        placeholder=False,
     )
 
 
@@ -55,74 +67,55 @@ def test_build_placeholder_response_is_deterministic() -> None:
     assert result.placeholder is True
     assert result.model == 'gpt-4.1-mini'
     assert result.recommendations == []
+    assert result.recommended_product_ids == []
     assert len(result.follow_up_prompts) == 2
 
 
-def test_build_chat_response_maps_retrieval_into_typed_recommendation(monkeypatch) -> None:
+def test_build_chat_response_delegates_to_workflow_and_sets_model(monkeypatch) -> None:
     payload = _payload()
-    products = [
-        _product(
-            product_id='essential-cropped-tee',
-            name='Essential Cropped Tee',
-            category='tops',
-            price_cents=2400,
-        ),
-        _product(
-            product_id='flow-sports-bra',
-            name='Flow Sports Bra',
-            category='tops',
-            price_cents=3600,
-        ),
-    ]
-    retrieval = RetrievalResult(
-        mode=RETRIEVAL_MODE_STRUCTURED,
-        filters=RetrievalFilters(category='tops', availability=True),
-        semantic_query='running tops',
-        hits=[
-            SearchHit(product_id='essential-cropped-tee', similarity_score=1.0),
-            SearchHit(product_id='flow-sports-bra', similarity_score=0.92),
-        ],
-        products=products,
-        candidate_count=2,
-    )
+    stub_workflow = _StubWorkflow(_recommended_response())
     monkeypatch.setattr(
-        'app.services.chat_service.get_search_service',
-        lambda: _StubSearchService(retrieval),
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: stub_workflow,
     )
 
     result = build_chat_response(payload, model_name='gpt-4.1-mini')
 
+    assert len(stub_workflow.calls) == 1
+    assert stub_workflow.calls[0].request_id == 'request-1'
     assert result.request_id == payload.request_id
     assert result.session_id == payload.session_id
     assert result.placeholder is False
     assert result.model == 'gpt-4.1-mini'
+    assert result.retrieval_mode == 'hybrid'
+    assert result.recommended_product_ids == ['essential-cropped-tee']
     assert len(result.recommendations) == 1
-    recommendation = result.recommendations[0]
-    assert len(recommendation.recommended_products) == 2
-    assert recommendation.recommended_products[0].product_id == 'essential-cropped-tee'
-    assert 'structured retrieval' in recommendation.summary
-    assert recommendation.comparison_summary == 'Top match confidence: 1.00'
-    assert len(result.follow_up_prompts) == 2
 
 
-def test_build_chat_response_returns_graceful_empty_result(monkeypatch) -> None:
+def test_build_chat_response_preserves_graceful_no_result_shape(monkeypatch) -> None:
     payload = _payload()
-    retrieval = RetrievalResult(
-        mode=RETRIEVAL_MODE_STRUCTURED,
-        filters=RetrievalFilters(category='bottoms'),
-        semantic_query='budget bottoms',
-        hits=[],
-        products=[],
-        candidate_count=0,
+    stub_workflow = _StubWorkflow(
+        ChatResponse(
+            request_id='request-1',
+            session_id='session-1',
+            assistant_message='No products found for those constraints.',
+            recommendations=[],
+            recommended_product_ids=[],
+            retrieval_mode='structured',
+            follow_up_prompts=['Try widening your budget range.'],
+            model='workflow-model',
+            placeholder=False,
+        )
     )
     monkeypatch.setattr(
-        'app.services.chat_service.get_search_service',
-        lambda: _StubSearchService(retrieval),
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: stub_workflow,
     )
 
     result = build_chat_response(payload, model_name='gpt-4.1-mini')
 
     assert result.placeholder is False
     assert result.recommendations == []
-    assert 'could not find products' in result.assistant_message.lower()
-    assert len(result.follow_up_prompts) == 2
+    assert result.recommended_product_ids == []
+    assert result.retrieval_mode == 'structured'
+    assert 'no products found' in result.assistant_message.lower()

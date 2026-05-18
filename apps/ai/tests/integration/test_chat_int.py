@@ -1,77 +1,76 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import pytest
 from fastapi.testclient import TestClient
 
-from app.search.constants import RETRIEVAL_MODE_HYBRID, RETRIEVAL_MODE_STRUCTURED
-from app.search.models import ProductRecord, RetrievalFilters, RetrievalResult, SearchHit
+from app.schemas import ChatRequest, ChatResponse, FinalRecommendation, ProductItem
 
 
-class _StubSearchService:
-    def __init__(self, result: RetrievalResult) -> None:
-        self._result = result
+class _StubWorkflow:
+    def __init__(self, response: ChatResponse) -> None:
+        self._response = response
+        self.calls: list[ChatRequest] = []
 
-    def retrieve(self, _: str) -> RetrievalResult:
-        return self._result
+    def run(self, payload: ChatRequest) -> ChatResponse:
+        self.calls.append(payload)
+        response = self._response.model_copy(deep=True)
+        response.request_id = payload.request_id
+        response.session_id = payload.session_id
+        return response
 
 
-def _retrieval_with_products() -> RetrievalResult:
-    products = [
-        ProductRecord(
-            product_id='essential-cropped-tee',
-            name='Essential Cropped Tee',
-            description='Soft cropped tee',
-            category='tops',
-            gender='women',
-            fit='relaxed',
-            color='white',
-            price_cents=2400,
-            currency='USD',
-            available=True,
-            rating=4.8,
-            stock=30,
-            updated_at=datetime.now(timezone.utc),
-        ),
-        ProductRecord(
-            product_id='flow-sports-bra',
-            name='Flow Sports Bra',
-            description='Supportive bra',
-            category='tops',
-            gender='women',
-            fit='supportive',
-            color='sage',
-            price_cents=3600,
-            currency='USD',
-            available=True,
-            rating=4.5,
-            stock=14,
-            updated_at=datetime.now(timezone.utc),
-        ),
-    ]
-
-    return RetrievalResult(
-        mode=RETRIEVAL_MODE_HYBRID,
-        filters=RetrievalFilters(category='tops', price_max_cents=5000, availability=True),
-        semantic_query='breathable for cardio',
-        hits=[
-            SearchHit(product_id='essential-cropped-tee', similarity_score=1.0),
-            SearchHit(product_id='flow-sports-bra', similarity_score=0.86),
+def _recommended_response() -> ChatResponse:
+    recommendation = FinalRecommendation(
+        summary='Two strong in-stock options for training tops.',
+        recommended_products=[
+            ProductItem(
+                product_id='essential-cropped-tee',
+                name='Essential Cropped Tee',
+                category='tops',
+                price_cents=2400,
+                currency='USD',
+                available=True,
+                rating=4.8,
+                short_description='Soft cropped tee',
+            ),
+            ProductItem(
+                product_id='flow-sports-bra',
+                name='Flow Sports Bra',
+                category='tops',
+                price_cents=3600,
+                currency='USD',
+                available=True,
+                rating=4.5,
+                short_description='Supportive bra',
+            ),
         ],
-        products=products,
-        candidate_count=2,
+        follow_up_prompts=['Want a lower price range?'],
+    )
+
+    return ChatResponse(
+        request_id='request-1',
+        session_id='session-1',
+        assistant_message='I found two options that match your constraints.',
+        recommendations=[recommendation],
+        recommended_product_ids=['essential-cropped-tee', 'flow-sports-bra'],
+        retrieval_mode='hybrid',
+        follow_up_prompts=['Want a lower price range?'],
+        model='workflow-model',
+        placeholder=False,
     )
 
 
-def _empty_retrieval() -> RetrievalResult:
-    return RetrievalResult(
-        mode=RETRIEVAL_MODE_STRUCTURED,
-        filters=RetrievalFilters(category='bottoms', price_max_cents=1000),
-        semantic_query='budget bottoms',
-        hits=[],
-        products=[],
-        candidate_count=0,
+def _no_result_response() -> ChatResponse:
+    return ChatResponse(
+        request_id='request-empty',
+        session_id='session-empty',
+        assistant_message='I could not find products that match those constraints yet.',
+        recommendations=[],
+        recommended_product_ids=[],
+        retrieval_mode='structured',
+        follow_up_prompts=['Try broadening your budget.'],
+        model='workflow-model',
+        placeholder=False,
     )
 
 
@@ -79,9 +78,10 @@ def test_chat_returns_typed_recommendation_response(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    stub_workflow = _StubWorkflow(_recommended_response())
     monkeypatch.setattr(
-        'app.services.chat_service.get_search_service',
-        lambda: _StubSearchService(_retrieval_with_products()),
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: stub_workflow,
     )
 
     response = client.post(
@@ -102,17 +102,21 @@ def test_chat_returns_typed_recommendation_response(
     assert payload['assistantMessage']
     assert payload['placeholder'] is False
     assert payload['model'] == 'gpt-4.1-mini'
+    assert payload['retrievalMode'] == 'hybrid'
+    assert payload['recommendedProductIds'] == ['essential-cropped-tee', 'flow-sports-bra']
     assert len(payload['recommendations']) == 1
     assert payload['recommendations'][0]['recommendedProducts'][0]['productId'] == 'essential-cropped-tee'
+    assert len(stub_workflow.calls) == 1
 
 
 def test_chat_returns_graceful_no_match_response(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    stub_workflow = _StubWorkflow(_no_result_response())
     monkeypatch.setattr(
-        'app.services.chat_service.get_search_service',
-        lambda: _StubSearchService(_empty_retrieval()),
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: stub_workflow,
     )
 
     response = client.post(
@@ -128,17 +132,21 @@ def test_chat_returns_graceful_no_match_response(
     assert response.status_code == 200
     payload = response.json()
     assert payload['placeholder'] is False
+    assert payload['retrievalMode'] == 'structured'
     assert payload['recommendations'] == []
+    assert payload['recommendedProductIds'] == []
     assert 'could not find products' in payload['assistantMessage'].lower()
+    assert len(stub_workflow.calls) == 1
 
 
 def test_chat_request_id_header_is_echoed_from_inbound_header(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    stub_workflow = _StubWorkflow(_no_result_response())
     monkeypatch.setattr(
-        'app.services.chat_service.get_search_service',
-        lambda: _StubSearchService(_empty_retrieval()),
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: stub_workflow,
     )
 
     response = client.post(
@@ -154,15 +162,17 @@ def test_chat_request_id_header_is_echoed_from_inbound_header(
 
     assert response.status_code == 200
     assert response.headers.get('x-request-id') == 'external-request-id'
+    assert len(stub_workflow.calls) == 1
 
 
 def test_chat_versioned_route_returns_same_contract(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    stub_workflow = _StubWorkflow(_recommended_response())
     monkeypatch.setattr(
-        'app.services.chat_service.get_search_service',
-        lambda: _StubSearchService(_retrieval_with_products()),
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: stub_workflow,
     )
 
     response = client.post(
@@ -176,4 +186,8 @@ def test_chat_versioned_route_returns_same_contract(
     )
 
     assert response.status_code == 200
-    assert response.json()['requestId'] == 'request-2'
+    payload = response.json()
+    assert payload['requestId'] == 'request-2'
+    assert payload['sessionId'] == 'session-2'
+    assert payload['placeholder'] is False
+    assert payload['recommendedProductIds'] == ['essential-cropped-tee', 'flow-sports-bra']

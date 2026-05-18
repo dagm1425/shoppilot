@@ -5,6 +5,7 @@ from .contracts import (
     ErrorResponse,
     FinalRecommendation,
     HealthResponse,
+    NormalizedFilters,
     ProductItem,
     SearchResult,
 )
@@ -24,6 +25,7 @@ __all__ = [
     'ErrorResponse',
     'FinalRecommendation',
     'HealthResponse',
+    'NormalizedFilters',
     'ProductItem',
     'SearchResult',
     'CompareItemsToolInput',

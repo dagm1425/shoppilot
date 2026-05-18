@@ -6,7 +6,14 @@ from app.config.settings import AppSettings
 from app.observability import capture_exception_if_configured
 from app.search.constants import RETRIEVAL_MODE_HYBRID, RETRIEVAL_MODE_SEMANTIC
 from app.search.embeddings import EmbeddingClient
-from app.search.models import ParsedIntent, ProductRecord, RetrievalFilters, RetrievalResult, SearchHit
+from app.search.models import (
+    ParsedIntent,
+    ProductRecord,
+    RetrievalFilters,
+    RetrievalMode,
+    RetrievalResult,
+    SearchHit,
+)
 from app.search.query_intent import parse_intent
 from app.search.repository import ProductRepository
 from app.search.vector_store import ProductVectorStore
@@ -23,21 +30,45 @@ class SemanticSearchService:
 
     def retrieve(self, message: str) -> RetrievalResult:
         intent = parse_intent(message)
+        return self.retrieve_for_intent(intent)
+
+    def retrieve_for_intent(
+        self,
+        intent: ParsedIntent,
+        *,
+        top_k: int | None = None,
+    ) -> RetrievalResult:
+        resolved_top_k = top_k or self._top_k
 
         try:
             if intent.mode == RETRIEVAL_MODE_SEMANTIC:
-                return self._semantic_retrieval(intent)
+                return self._semantic_retrieval(intent, top_k=resolved_top_k)
 
             if intent.mode == RETRIEVAL_MODE_HYBRID:
-                return self._hybrid_retrieval(intent)
+                return self._hybrid_retrieval(intent, top_k=resolved_top_k)
 
-            return self._structured_retrieval(intent)
+            return self._structured_retrieval(intent, top_k=resolved_top_k)
         except Exception as exc:
             capture_exception_if_configured(exc)
             raise
 
-    def _structured_retrieval(self, intent: ParsedIntent) -> RetrievalResult:
-        products = self._repository.list_products(filters=intent.filters, limit=self._top_k)
+    def retrieve_with_plan(
+        self,
+        *,
+        retrieval_mode: RetrievalMode,
+        filters: RetrievalFilters,
+        semantic_query: str,
+        top_k: int | None = None,
+    ) -> RetrievalResult:
+        planned_intent = ParsedIntent(
+            mode=retrieval_mode,
+            semantic_query=semantic_query,
+            filters=filters,
+        )
+        return self.retrieve_for_intent(planned_intent, top_k=top_k)
+
+    def _structured_retrieval(self, intent: ParsedIntent, *, top_k: int) -> RetrievalResult:
+        products = self._repository.list_products(filters=intent.filters, limit=top_k)
         hits = [
             SearchHit(product_id=product.product_id, similarity_score=_rank_score(index))
             for index, product in enumerate(products)
@@ -51,9 +82,9 @@ class SemanticSearchService:
             candidate_count=len(products),
         )
 
-    def _semantic_retrieval(self, intent: ParsedIntent) -> RetrievalResult:
+    def _semantic_retrieval(self, intent: ParsedIntent, *, top_k: int) -> RetrievalResult:
         query_embedding = self._get_embedding_client().embed_text(intent.semantic_query)
-        hits = self._get_vector_store().query(query_embedding=query_embedding, top_k=self._top_k, where=None)
+        hits = self._get_vector_store().query(query_embedding=query_embedding, top_k=top_k, where=None)
         products = self._hydrate_products(hits)
         hydrated_hits = _hydrate_hits(products=products, hits=hits)
         return RetrievalResult(
@@ -65,7 +96,7 @@ class SemanticSearchService:
             candidate_count=len(hits),
         )
 
-    def _hybrid_retrieval(self, intent: ParsedIntent) -> RetrievalResult:
+    def _hybrid_retrieval(self, intent: ParsedIntent, *, top_k: int) -> RetrievalResult:
         candidate_ids = self._repository.list_product_ids(
             filters=intent.filters,
             limit=self._hybrid_candidate_limit,
@@ -82,10 +113,10 @@ class SemanticSearchService:
 
         where = _build_vector_where(filters=intent.filters, candidate_ids=candidate_ids)
         query_embedding = self._get_embedding_client().embed_text(intent.semantic_query)
-        hits = self._get_vector_store().query(query_embedding=query_embedding, top_k=self._top_k, where=where)
+        hits = self._get_vector_store().query(query_embedding=query_embedding, top_k=top_k, where=where)
 
         if not hits:
-            products = self._repository.get_products_by_ids(candidate_ids[: self._top_k])
+            products = self._repository.get_products_by_ids(candidate_ids[:top_k])
             fallback_hits = [
                 SearchHit(product_id=product.product_id, similarity_score=_rank_score(index))
                 for index, product in enumerate(products)

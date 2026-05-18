@@ -1,50 +1,55 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import pytest
 from fastapi.testclient import TestClient
 
-from app.search.constants import RETRIEVAL_MODE_SEMANTIC
-from app.search.models import ProductRecord, RetrievalFilters, RetrievalResult, SearchHit
+from app.schemas import ChatRequest, ChatResponse, FinalRecommendation, ProductItem
 
 
-class _StubSearchService:
-    def __init__(self, result: RetrievalResult | None = None, *, should_raise: bool = False) -> None:
-        self._result = result
+class _StubWorkflow:
+    def __init__(self, response: ChatResponse | None = None, *, should_raise: bool = False) -> None:
+        self._response = response
         self._should_raise = should_raise
 
-    def retrieve(self, _: str) -> RetrievalResult:
+    def run(self, payload: ChatRequest) -> ChatResponse:
         if self._should_raise:
-            raise RuntimeError('vector lookup failed')
-        if self._result is None:
+            raise RuntimeError('assistant graph failed')
+        if self._response is None:
             raise RuntimeError('stub result missing')
-        return self._result
+        response = self._response.model_copy(deep=True)
+        response.request_id = payload.request_id
+        response.session_id = payload.session_id
+        return response
 
 
-def _semantic_retrieval() -> RetrievalResult:
-    product = ProductRecord(
-        product_id='studio-training-jogger',
-        name='Studio Training Jogger',
-        description='Tapered jogger for training',
-        category='bottoms',
-        gender='men',
-        fit='tapered',
-        color='stone',
-        price_cents=5200,
-        currency='USD',
-        available=True,
-        rating=4.6,
-        stock=12,
-        updated_at=datetime.now(timezone.utc),
+def _success_response() -> ChatResponse:
+    recommendation = FinalRecommendation(
+        summary='One strong jogger option matched your request.',
+        recommended_products=[
+            ProductItem(
+                product_id='studio-training-jogger',
+                name='Studio Training Jogger',
+                category='bottoms',
+                price_cents=5200,
+                currency='USD',
+                available=True,
+                rating=4.6,
+                short_description='Tapered jogger for training',
+            )
+        ],
+        follow_up_prompts=['Want a lower-priced alternative?'],
     )
-    return RetrievalResult(
-        mode=RETRIEVAL_MODE_SEMANTIC,
-        filters=RetrievalFilters(),
-        semantic_query='tapered jogger',
-        hits=[SearchHit(product_id='studio-training-jogger', similarity_score=0.88)],
-        products=[product],
-        candidate_count=1,
+
+    return ChatResponse(
+        request_id='request-success',
+        session_id='session-success',
+        assistant_message='I found one tapered jogger to consider.',
+        recommendations=[recommendation],
+        recommended_product_ids=['studio-training-jogger'],
+        retrieval_mode='semantic',
+        follow_up_prompts=['Want a lower-priced alternative?'],
+        model='workflow-model',
+        placeholder=False,
     )
 
 
@@ -52,9 +57,10 @@ def test_chat_success_path_returns_typed_recommendation_contract(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    stub_workflow = _StubWorkflow(_success_response())
     monkeypatch.setattr(
-        'app.services.chat_service.get_search_service',
-        lambda: _StubSearchService(_semantic_retrieval()),
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: stub_workflow,
     )
 
     response = client.post(
@@ -70,6 +76,8 @@ def test_chat_success_path_returns_typed_recommendation_contract(
     assert response.status_code == 200
     payload = response.json()
     assert payload['placeholder'] is False
+    assert payload['retrievalMode'] == 'semantic'
+    assert payload['recommendedProductIds'] == ['studio-training-jogger']
     assert len(payload['recommendations']) == 1
     assert payload['recommendations'][0]['recommendedProducts'][0]['productId'] == 'studio-training-jogger'
 
@@ -103,8 +111,8 @@ def test_chat_validation_error_echoes_inbound_request_id(client: TestClient) -> 
 
 def test_chat_internal_error_returns_typed_error_response(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        'app.services.chat_service.get_search_service',
-        lambda: _StubSearchService(should_raise=True),
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: _StubWorkflow(should_raise=True),
     )
 
     from app.main import create_app

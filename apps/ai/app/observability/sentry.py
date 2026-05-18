@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 import sentry_sdk
 
@@ -40,8 +41,19 @@ def initialize_sentry(settings: AppSettings) -> None:
     )
 
 
-def capture_exception_if_configured(exc: Exception) -> None:
+def capture_exception_if_configured(
+    exc: Exception,
+    *,
+    tags: Mapping[str, str] | None = None,
+) -> None:
     if not _sentry_initialized:
         return
 
-    sentry_sdk.capture_exception(exc)
+    if tags is None:
+        sentry_sdk.capture_exception(exc)
+        return
+
+    with sentry_sdk.push_scope() as scope:
+        for key, value in tags.items():
+            scope.set_tag(key, value)
+        sentry_sdk.capture_exception(exc)
