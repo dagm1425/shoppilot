@@ -2,11 +2,21 @@ import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ProductCategory, ProductGender, ProductMediaRole, Role } from '@prisma/client';
 import { parseEnv } from '../../src/config/env.js';
+import type { PrismaService } from '../../src/prisma/prisma.service.js';
+import type { AdminMediaPresignInput } from '../../src/products/products.schemas.js';
 import { createTestApp } from '../helpers/test-app.js';
 
 const env = parseEnv(process.env);
 
-const adminUser = {
+type TestAuthUser = {
+  id: string;
+  username: string;
+  email: string;
+  role: Role;
+  sessionVersion: number;
+};
+
+const adminUser: TestAuthUser = {
   id: 'user_admin_1',
   username: 'admin_1',
   email: 'admin@shoppilot.local',
@@ -14,7 +24,7 @@ const adminUser = {
   sessionVersion: 0,
 };
 
-const customerUser = {
+const customerUser: TestAuthUser = {
   id: 'user_customer_1',
   username: 'customer_1',
   email: 'customer@shoppilot.local',
@@ -23,6 +33,30 @@ const customerUser = {
 };
 
 const users = [adminUser, customerUser];
+
+type UserFindUniqueArgs = {
+  where: {
+    id?: string;
+    email?: string;
+  };
+  select?: {
+    id?: boolean;
+    username?: boolean;
+    email?: boolean;
+    role?: boolean;
+    sessionVersion?: boolean;
+  };
+};
+
+type ProductUpdateTransactionClient = {
+  product: {
+    update: () => Promise<{ id: string }>;
+    findUniqueOrThrow: () => Promise<object>;
+  };
+  productMedia: {
+    upsert: jest.Mock;
+  };
+};
 
 describe('Admin products APIs (integration)', () => {
   const prismaMock = {
@@ -39,12 +73,12 @@ describe('Admin products APIs (integration)', () => {
       upsert: jest.fn(),
     },
     $transaction: jest.fn(),
-  } as any;
+  };
 
-  let lastPresignCall: { input: any; requestId: string | undefined } | null = null;
+  let lastPresignCall: { input: AdminMediaPresignInput; requestId: string | undefined } | null = null;
 
   const mediaStorageStub = {
-    createPresignedUpload: async (input: any, requestId?: string) => {
+    createPresignedUpload: async (input: AdminMediaPresignInput, requestId?: string) => {
       lastPresignCall = { input, requestId };
       return {
         role: input.role,
@@ -65,7 +99,7 @@ describe('Admin products APIs (integration)', () => {
 
   beforeAll(async () => {
     app = await createTestApp({
-      prismaService: prismaMock,
+      prismaService: prismaMock as unknown as Partial<PrismaService>,
       productMediaStorageService: mediaStorageStub,
     });
 
@@ -84,7 +118,7 @@ describe('Admin products APIs (integration)', () => {
     jest.clearAllMocks();
     lastPresignCall = null;
 
-    prismaMock.user.findUnique.mockImplementation(async ({ where, select }: any) => {
+    prismaMock.user.findUnique.mockImplementation(async ({ where, select }: UserFindUniqueArgs) => {
       const user = where.id
         ? users.find((item) => item.id === where.id)
         : users.find((item) => item.email === where.email);
@@ -111,7 +145,7 @@ describe('Admin products APIs (integration)', () => {
     await app.close();
   });
 
-  async function cookieFor(user: typeof adminUser) {
+  async function cookieFor(user: TestAuthUser) {
     const token = await jwtService.signAsync({
       sub: user.id,
       role: user.role,
@@ -277,7 +311,7 @@ describe('Admin products APIs (integration)', () => {
     const upsertSpy = jest.fn().mockResolvedValue(undefined);
 
     prismaMock.product.findUnique.mockResolvedValueOnce(existing);
-    prismaMock.$transaction.mockImplementationOnce(async (callback: any) => {
+    prismaMock.$transaction.mockImplementationOnce(async (callback: (tx: ProductUpdateTransactionClient) => Promise<object>) => {
       return callback({
         product: {
           update: async () => ({ id: 'product_1' }),
