@@ -44,6 +44,14 @@ function resolvePostAuthRedirect(rawRedirect: string | null): string {
   return rawRedirect;
 }
 
+function resolvePostLoginRoute(rawRedirect: string | null, role: 'CUSTOMER' | 'ADMIN'): string {
+  if (role === 'ADMIN') {
+    return '/admin';
+  }
+
+  return resolvePostAuthRedirect(rawRedirect);
+}
+
 function AuthTextField({
   id,
   label,
@@ -169,7 +177,7 @@ export function AuthForm({ mode, postLoginRedirect = null }: AuthFormProps) {
       }
       const nextRoute =
         mode === 'login'
-          ? resolvePostAuthRedirect(postLoginRedirect)
+          ? resolvePostLoginRoute(postLoginRedirect, result.data.user.role)
           : '/catalog';
       router.push(nextRoute);
     } catch (error) {

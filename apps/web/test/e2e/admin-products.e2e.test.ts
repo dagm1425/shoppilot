@@ -1,5 +1,40 @@
 import { test, expect, type Page } from '@playwright/test';
 
+type PresignRequestPayload = {
+  role: string;
+  fileName: string;
+  contentType: string;
+};
+
+type AdminCreatePayload = {
+  slug: string;
+  name: string;
+  description: string;
+  category: string;
+  gender: string;
+  fit: string;
+  color: string;
+  priceCents: number;
+  available: boolean;
+  stock: number;
+  media: {
+    primary: {
+      objectKey: string;
+      url: string;
+    };
+    secondary: {
+      objectKey: string;
+      url: string;
+    };
+  };
+};
+
+type AdminUpdatePayload = {
+  name: string;
+  priceCents: number;
+  stock: number;
+};
+
 function cors(origin: string) {
   return {
     'access-control-allow-origin': origin,
@@ -52,7 +87,7 @@ async function mockAdminAuth(page: Page) {
 test('admin can upload media and create a product', async ({ page }) => {
   await mockAdminAuth(page);
 
-  let createPayload: any = null;
+  let createPayload: unknown = null;
   let uploadSequence = 0;
 
   await page.route('**/products/admin/media/presign', async (route) => {
@@ -69,7 +104,7 @@ test('admin can upload media and create a product', async ({ page }) => {
       return;
     }
 
-    const body = request.postDataJSON() as any;
+    const body = request.postDataJSON() as PresignRequestPayload;
     uploadSequence += 1;
     const objectKey = `products/2026/05/${uploadSequence}-${body.role}-${body.fileName}`;
 
@@ -114,25 +149,26 @@ test('admin can upload media and create a product', async ({ page }) => {
       return;
     }
 
-    createPayload = request.postDataJSON();
+    const payload = request.postDataJSON() as AdminCreatePayload;
+    createPayload = payload;
     await route.fulfill({
       status: 201,
       headers,
       body: JSON.stringify({
         product: {
-          productId: createPayload.slug,
-          name: createPayload.name,
-          description: createPayload.description,
-          category: createPayload.category,
-          gender: createPayload.gender,
-          fit: createPayload.fit,
-          color: createPayload.color,
-          priceCents: createPayload.priceCents,
+          productId: payload.slug,
+          name: payload.name,
+          description: payload.description,
+          category: payload.category,
+          gender: payload.gender,
+          fit: payload.fit,
+          color: payload.color,
+          priceCents: payload.priceCents,
           currency: 'USD',
-          available: createPayload.available,
-          stock: createPayload.stock,
-          primaryImageUrl: createPayload.media.primary.url,
-          secondaryImageUrl: createPayload.media.secondary.url,
+          available: payload.available,
+          stock: payload.stock,
+          primaryImageUrl: payload.media.primary.url,
+          secondaryImageUrl: payload.media.secondary.url,
           media: [],
           createdAt: '2026-05-17T12:30:00.000Z',
           updatedAt: '2026-05-17T12:30:00.000Z',
@@ -167,16 +203,17 @@ test('admin can upload media and create a product', async ({ page }) => {
   await page.getByRole('button', { name: 'Create product' }).click();
 
   await expect(page.getByText('Created Velocity Training Tee (velocity-training-tee).')).toBeVisible();
-  expect(createPayload.media.primary.objectKey).toContain('primary-primary.webp');
-  expect(createPayload.media.secondary.objectKey).toContain('secondary-secondary.webp');
+  const capturedCreatePayload = createPayload as AdminCreatePayload;
+  expect(capturedCreatePayload.media.primary.objectKey).toContain('primary-primary.webp');
+  expect(capturedCreatePayload.media.secondary.objectKey).toContain('secondary-secondary.webp');
 });
 
-test('admin update flow handles lookup failure then recovery', async ({ page }) => {
+test('admin can load and update an existing product', async ({ page }) => {
   await mockAdminAuth(page);
 
-  let updatePayload: any = null;
+  let updatePayload: unknown = null;
 
-  await page.route('**/products/**', async (route) => {
+  await page.route('**/products**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.port !== '4000') {
@@ -190,14 +227,34 @@ test('admin update flow handles lookup failure then recovery', async ({ page }) 
       return;
     }
 
-    if (url.pathname.endsWith('/products/missing-product') && request.method() === 'GET') {
+    if (url.pathname.endsWith('/products') && request.method() === 'GET') {
       await route.fulfill({
-        status: 404,
+        status: 200,
         headers,
         body: JSON.stringify({
-          error: {
-            code: 'PRODUCT_NOT_FOUND',
-            message: 'Product not found.',
+          items: [
+            {
+              productId: 'arrival-oversized-tank',
+              name: 'Arrival Oversized Tank',
+              category: 'tops',
+              gender: 'men',
+              fit: 'Oversized',
+              color: 'Black',
+              priceCents: 3000,
+              currency: 'USD',
+              available: true,
+              primaryImageUrl: 'https://cdn.shoppilot.local/products/arrival-primary.webp',
+              secondaryImageUrl: 'https://cdn.shoppilot.local/products/arrival-secondary.webp',
+            },
+          ],
+          pagination: {
+            page: 1,
+            pageSize: 100,
+            total: 1,
+            totalPages: 1,
+          },
+          appliedFilters: {
+            sort: 'newest',
           },
         }),
       });
@@ -230,23 +287,24 @@ test('admin update flow handles lookup failure then recovery', async ({ page }) 
     }
 
     if (url.pathname.endsWith('/products/admin/arrival-oversized-tank') && request.method() === 'PATCH') {
-      updatePayload = request.postDataJSON();
+      const payload = request.postDataJSON() as AdminUpdatePayload;
+      updatePayload = payload;
       await route.fulfill({
         status: 200,
         headers,
         body: JSON.stringify({
           product: {
             productId: 'arrival-oversized-tank',
-            name: updatePayload.name,
+            name: payload.name,
             description: 'Breathable training tank designed for daily workouts.',
             category: 'tops',
             gender: 'men',
             fit: 'Oversized',
             color: 'Black',
-            priceCents: updatePayload.priceCents,
+            priceCents: payload.priceCents,
             currency: 'USD',
             available: true,
-            stock: updatePayload.stock,
+            stock: payload.stock,
             primaryImageUrl: 'https://cdn.shoppilot.local/products/arrival-primary.webp',
             secondaryImageUrl: 'https://cdn.shoppilot.local/products/arrival-secondary.webp',
             media: [],
@@ -266,11 +324,9 @@ test('admin update flow handles lookup failure then recovery', async ({ page }) 
   });
 
   await page.goto('/admin/products');
-  await page.getByLabel('Product slug').fill('missing-product');
-  await page.getByRole('button', { name: 'Load product' }).click();
-  await expect(page.getByText('Product not found.')).toBeVisible();
-
-  await page.getByLabel('Product slug').fill('arrival-oversized-tank');
+  await expect(page.locator('#lookup-product-id option[value="arrival-oversized-tank"]')).toHaveCount(1);
+  await expect(page.getByLabel('Product slug')).toBeEnabled();
+  await page.getByLabel('Product slug').selectOption('arrival-oversized-tank');
   await page.getByRole('button', { name: 'Load product' }).click();
   await expect(page.getByText('Loaded Arrival Oversized Tank. You can apply updates now.')).toBeVisible();
 
@@ -280,7 +336,8 @@ test('admin update flow handles lookup failure then recovery', async ({ page }) 
   await page.getByRole('button', { name: 'Save updates' }).click();
 
   await expect(page.getByText('Updated Arrival Oversized Tank Updated (arrival-oversized-tank).')).toBeVisible();
-  expect(updatePayload.name).toBe('Arrival Oversized Tank Updated');
-  expect(updatePayload.priceCents).toBe(3550);
-  expect(updatePayload.stock).toBe(19);
+  const capturedUpdatePayload = updatePayload as AdminUpdatePayload;
+  expect(capturedUpdatePayload.name).toBe('Arrival Oversized Tank Updated');
+  expect(capturedUpdatePayload.priceCents).toBe(3550);
+  expect(capturedUpdatePayload.stock).toBe(19);
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import type { Dispatch, FormEvent, ReactNode, SetStateAction } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   createAdminProduct,
   getAdminProductsErrorMessage,
@@ -19,7 +19,7 @@ import {
   type AdminProductMediaRole,
   type AdminUpdateProductInput,
 } from '../lib/admin-product-form-schemas';
-import { fetchCatalogProductDetails } from '../lib/catalog-api';
+import { fetchCatalogProductDetails, fetchCatalogProducts } from '../lib/catalog-api';
 import { reportClientError } from '../lib/client-error';
 import { showToast } from '../lib/toast-store';
 import { StatePanel } from './state-panel';
@@ -60,6 +60,10 @@ type UploadState = {
 type OperationState = {
   status: 'idle' | 'loading' | 'error' | 'success' | 'disabled';
   message: string;
+};
+
+type ProductLookupOption = {
+  slug: string;
 };
 
 const MAX_UPLOAD_BYTES = 5_242_880;
@@ -320,9 +324,15 @@ export function AdminProductsPanel() {
   );
 
   const [lookupProductId, setLookupProductId] = useState('');
+  const [lookupSearch, setLookupSearch] = useState('');
+  const [lookupOptions, setLookupOptions] = useState<ProductLookupOption[]>([]);
+  const [lookupOptionsState, setLookupOptionsState] = useState<OperationState>({
+    status: 'loading',
+    message: 'Loading product slugs...',
+  });
   const [lookupState, setLookupState] = useState<OperationState>({
     status: 'idle',
-    message: 'Enter an existing product slug to load update fields.',
+    message: 'Select an existing product slug to load update fields.',
   });
   const [loadedProductId, setLoadedProductId] = useState<string | null>(null);
   const [updateForm, setUpdateForm] = useState<ProductEditFormState>(defaultUpdateForm);
@@ -337,6 +347,29 @@ export function AdminProductsPanel() {
     createOperation.status === 'loading' || createPrimaryUpload.uploading || createSecondaryUpload.uploading;
   const updateBusy =
     updateOperation.status === 'loading' || updatePrimaryUpload.uploading || updateSecondaryUpload.uploading;
+
+  const firstLookupSearchMatch = useMemo(() => {
+    const normalized = lookupSearch.trim().toLowerCase();
+    if (normalized.length === 0) {
+      return null;
+    }
+
+    return lookupOptions.find((option) => option.slug.toLowerCase().includes(normalized)) ?? null;
+  }, [lookupOptions, lookupSearch]);
+
+  useEffect(() => {
+    if (!firstLookupSearchMatch) {
+      return;
+    }
+
+    setLookupProductId((previous) => {
+      if (previous === firstLookupSearchMatch.slug) {
+        return previous;
+      }
+
+      return firstLookupSearchMatch.slug;
+    });
+  }, [firstLookupSearchMatch]);
 
   const canSubmitCreate = Boolean(createPrimaryUpload.metadata) && !createBusy;
 
@@ -369,6 +402,69 @@ export function AdminProductsPanel() {
         return 'empty' as const;
     }
   }, [updateOperation.status]);
+
+  async function loadLookupOptions() {
+    setLookupOptionsState({
+      status: 'loading',
+      message: 'Loading product slugs...',
+    });
+
+    try {
+      const collected = new Map<string, ProductLookupOption>();
+      const pageSize = 100;
+      let page = 1;
+      let totalPages = 1;
+
+      while (page <= totalPages && page <= 20) {
+        const response = await fetchCatalogProducts({
+          page,
+          pageSize,
+          sort: 'newest',
+        });
+
+        if (!response.ok) {
+          setLookupOptionsState({
+            status: 'error',
+            message: response.message,
+          });
+          return;
+        }
+
+        for (const item of response.data.items) {
+          collected.set(item.productId, {
+            slug: item.productId,
+          });
+        }
+
+        totalPages = response.data.pagination.totalPages;
+        page += 1;
+      }
+
+      const options = [...collected.values()].sort((left, right) => left.slug.localeCompare(right.slug));
+      setLookupOptions(options);
+      setLookupProductId((previous) => {
+        if (previous.trim().length > 0) {
+          return previous;
+        }
+
+        return options[0]?.slug ?? '';
+      });
+      setLookupOptionsState({
+        status: 'success',
+        message: `Loaded ${options.length} product slugs.`,
+      });
+    } catch (error) {
+      reportClientError({ error, context: 'admin-products:lookup-options' });
+      setLookupOptionsState({
+        status: 'error',
+        message: 'Could not load product slugs right now.',
+      });
+    }
+  }
+
+  useEffect(() => {
+    void loadLookupOptions();
+  }, []);
 
   async function uploadMedia(
     role: AdminProductMediaRole,
@@ -888,25 +984,71 @@ export function AdminProductsPanel() {
           </div>
 
           <div className="space-y-2 rounded-md border border-border bg-background p-3">
-            <FormField id="lookup-product-id" label="Product slug">
+            <FormField id="lookup-product-search" label="Search slugs">
               <TextInput
-                id="lookup-product-id"
-                value={lookupProductId}
-                disabled={lookupState.status === 'loading' || updateBusy}
-                onChange={setLookupProductId}
-                placeholder="arrival-oversized-tank"
+                id="lookup-product-search"
+                value={lookupSearch}
+                disabled={lookupState.status === 'loading' || updateBusy || lookupOptionsState.status === 'loading'}
+                onChange={setLookupSearch}
+                placeholder="Search slug"
               />
             </FormField>
-            <button
-              type="button"
-              onClick={() => {
-                void handleLookupProduct();
-              }}
-              disabled={lookupState.status === 'loading' || updateBusy}
-              className="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            <FormField id="lookup-product-id" label="Product slug">
+              <select
+                id="lookup-product-id"
+                value={lookupProductId}
+                disabled={lookupState.status === 'loading' || updateBusy || lookupOptionsState.status === 'loading'}
+                onChange={(event) => setLookupProductId(event.target.value)}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-foreground/40 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <option value="" disabled>
+                  {lookupOptions.length > 0 ? 'Select a product slug' : 'No slugs available'}
+                </option>
+                {lookupOptions.map((option) => (
+                  <option key={option.slug} value={option.slug}>
+                    {option.slug}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void handleLookupProduct();
+                }}
+                disabled={
+                  lookupState.status === 'loading'
+                  || updateBusy
+                  || lookupOptionsState.status === 'loading'
+                  || lookupProductId.trim().length === 0
+                }
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {lookupState.status === 'loading' ? 'Loading...' : 'Load product'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void loadLookupOptions();
+                }}
+                disabled={lookupOptionsState.status === 'loading' || updateBusy}
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {lookupOptionsState.status === 'loading' ? 'Refreshing list...' : 'Refresh slug list'}
+              </button>
+            </div>
+            <p
+              className={`text-xs ${
+                lookupOptionsState.status === 'error'
+                  ? 'text-danger'
+                  : lookupOptionsState.status === 'success'
+                    ? 'text-success'
+                    : 'text-muted-foreground'
+              }`}
             >
-              {lookupState.status === 'loading' ? 'Loading...' : 'Load product'}
-            </button>
+              {lookupOptionsState.message}
+            </p>
             <StatePanel
               variant={
                 lookupState.status === 'loading'

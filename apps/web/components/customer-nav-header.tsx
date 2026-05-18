@@ -443,6 +443,12 @@ export function CustomerNavHeader() {
           >
             See all
           </Link>
+          <Link
+            href="/assistant"
+            className="inline-flex h-full items-center px-3 font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground"
+          >
+            Assistant
+          </Link>
         </nav>
 
         <div className="ml-auto hidden items-center gap-2 md:flex">
@@ -490,6 +496,15 @@ export function CustomerNavHeader() {
                     <p className="text-center text-base text-foreground">
                       Hi, <span className="font-semibold">{greetingName}</span>
                     </p>
+                    {user.role === 'ADMIN' ? (
+                      <Link
+                        href="/admin"
+                        onClick={() => setDesktopAccountMenuOpen(false)}
+                        className="inline-flex w-full items-center justify-center rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background"
+                      >
+                        Admin workspace
+                      </Link>
+                    ) : null}
                     <button
                       type="button"
                       onClick={handleSignOut}
@@ -559,6 +574,15 @@ export function CustomerNavHeader() {
                     <p className="text-center text-base text-foreground">
                       Hi, <span className="font-semibold">{greetingName}</span>
                     </p>
+                    {user.role === 'ADMIN' ? (
+                      <Link
+                        href="/admin"
+                        onClick={() => setMobileAccountMenuOpen(false)}
+                        className="inline-flex w-full items-center justify-center rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background"
+                      >
+                        Admin workspace
+                      </Link>
+                    ) : null}
                     <button
                       type="button"
                       onClick={handleSignOut}
@@ -628,6 +652,12 @@ export function CustomerNavHeader() {
               className="block rounded-lg border border-border bg-card px-4 py-3 font-auth-heading text-sm font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-muted"
             >
               See all
+            </Link>
+            <Link
+              href="/assistant"
+              className="block rounded-lg border border-border bg-card px-4 py-3 font-auth-heading text-sm font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-muted"
+            >
+              Assistant
             </Link>
           </nav>
         </div>

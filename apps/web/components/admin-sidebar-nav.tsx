@@ -7,13 +7,12 @@ import { cn } from '../lib/utils';
 type AdminNavItem = {
   href: string;
   label: string;
-  placeholder?: boolean;
 };
 
 const navItems: AdminNavItem[] = [
   { href: '/admin', label: 'Home' },
   { href: '/admin/products', label: 'Products' },
-  { href: '/admin/orders', label: 'Orders', placeholder: true },
+  { href: '/admin/orders', label: 'Orders' },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -41,19 +40,14 @@ export function AdminSidebarNav() {
               key={item.href}
               href={item.href}
               aria-current={active ? 'page' : undefined}
-              className={cn(
-                'flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors',
+            className={cn(
+                'flex items-center rounded-md border px-3 py-2 text-sm transition-colors',
                 active
                   ? 'border-foreground/20 bg-muted text-foreground'
                   : 'border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground',
               )}
             >
               <span className="font-medium">{item.label}</span>
-              {item.placeholder ? (
-                <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                  Soon
-                </span>
-              ) : null}
             </Link>
           );
         })}

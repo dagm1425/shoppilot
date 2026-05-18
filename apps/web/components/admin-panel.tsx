@@ -3,6 +3,8 @@
 import type { AdminHomeSummaryResponse, AdminRecentOrderPreview } from '@shoppilot/db/admin-dashboard-contract';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { IconType } from 'react-icons';
+import { LuClock3, LuDollarSign, LuReceipt, LuWalletCards } from 'react-icons/lu';
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 import { useAuthStore } from '../lib/auth-store';
 import { fetchAdminHomeSummary, getAdminHomeErrorMessage } from '../lib/admin-api';
@@ -58,16 +60,25 @@ type KpiCardProps = {
   label: string;
   value: string;
   description: string;
+  icon: IconType;
+  iconToneClass: string;
 };
 
-function KpiCard({ label, value, description }: KpiCardProps) {
+function KpiCard({ label, value, description, icon: Icon, iconToneClass }: KpiCardProps) {
   return (
     <Card className="border-border/90 shadow-none">
-      <CardHeader className="space-y-2 p-4 pb-2">
-        <CardDescription className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-          {label}
-        </CardDescription>
-        <CardTitle className="text-2xl font-semibold text-foreground">{value}</CardTitle>
+      <CardHeader className="p-4 pb-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-2">
+            <CardDescription className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              {label}
+            </CardDescription>
+            <CardTitle className="text-2xl font-semibold text-foreground">{value}</CardTitle>
+          </div>
+          <span className={`inline-flex size-10 shrink-0 items-center justify-center rounded-full ${iconToneClass}`}>
+            <Icon className="size-5" aria-hidden="true" />
+          </span>
+        </div>
       </CardHeader>
       <CardContent className="p-4 pt-0">
         <p className="text-xs text-muted-foreground">{description}</p>
@@ -251,21 +262,29 @@ export function AdminPanel() {
           label="Orders today"
           value={summary.kpis.ordersToday.toLocaleString('en-US')}
           description="Orders created since local midnight."
+          icon={LuReceipt}
+          iconToneClass="bg-sky-50 text-sky-700 ring-1 ring-sky-100"
         />
         <KpiCard
           label="Gross revenue today"
           value={formatMoney(summary.kpis.grossRevenueTodayCents, summary.currency)}
           description="Paid-order total booked today."
+          icon={LuDollarSign}
+          iconToneClass="bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
         />
         <KpiCard
           label="Paid orders today"
           value={summary.kpis.paidOrdersToday.toLocaleString('en-US')}
           description="Orders with payment confirmed today."
+          icon={LuWalletCards}
+          iconToneClass="bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100"
         />
         <KpiCard
           label="Pending payment"
           value={summary.kpis.pendingPaymentOrders.toLocaleString('en-US')}
           description="Current orders awaiting payment completion."
+          icon={LuClock3}
+          iconToneClass="bg-amber-50 text-amber-700 ring-1 ring-amber-100"
         />
       </section>
 
