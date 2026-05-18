@@ -118,6 +118,7 @@ Use this file to track high-value tests by phase, evidence, and latest result st
 | P3-3.4-T002 | Admin Orders API Role Boundary | P0 | INT | `GET /orders/admin/list` denies customer-role tokens with `AUTH_FORBIDDEN` and enforces admin-only access. | `apps/api/test/integration/admin-orders.int.test.ts` | Yes | Passing | 2026-05-17 |
 | P3-3.4-T003 | Admin Orders API Filters + Pagination | P0 | INT | Admin orders list returns newest-first pagination and supports combined status/customer/date filtering with validation failure on invalid date ranges. | `apps/api/test/integration/admin-orders.int.test.ts` | Yes | Passing | 2026-05-17 |
 | P3-3.4-T004 | Admin Orders UI Flow | P0 | E2E | `/admin/orders` supports pagination navigation, combined filter apply/clear actions, and stable list rendering under mocked API responses. | `apps/web/test/e2e/admin-orders.e2e.test.ts` | Yes | Passing | 2026-05-17 |
+| P3-3.6-T001 | Queue Health Endpoint | P0 | INT | `GET /orders/admin/queue-health` enforces admin-only access and returns read-only BullMQ queue counts (`waiting`, `active`, `completed`, `failed`) with timestamp payload. | `apps/api/test/integration/admin-orders.int.test.ts`, `apps/api/test/helpers/test-app.ts` | Yes | Passing | 2026-05-18 |
 
 ### Phase: Vercel AI Assistant
 

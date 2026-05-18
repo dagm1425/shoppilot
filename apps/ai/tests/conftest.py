@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config.settings import get_settings
-from app.main import create_app
 
 
 def _set_required_env() -> None:
@@ -30,6 +29,8 @@ def test_env() -> Iterator[None]:
 def client() -> Iterator[TestClient]:
     _set_required_env()
     get_settings.cache_clear()
+    from app.main import create_app
+
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client

@@ -38,3 +38,23 @@ def test_settings_require_langsmith_keys_when_tracing_enabled(
 
     with pytest.raises(ValidationError):
         AppSettings(_env_file=None)
+
+
+def test_settings_allow_sentry_disabled_without_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv('SENTRY_ENABLED', 'false')
+    monkeypatch.delenv('SENTRY_DSN', raising=False)
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.sentry_enabled is False
+    assert settings.sentry_dsn is None
+
+
+def test_settings_require_sentry_dsn_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv('SENTRY_ENABLED', 'true')
+    monkeypatch.delenv('SENTRY_DSN', raising=False)
+
+    with pytest.raises(ValidationError):
+        AppSettings(_env_file=None)

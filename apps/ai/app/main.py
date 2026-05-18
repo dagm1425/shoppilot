@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from app.api.router import api_router
 from app.config.settings import get_settings
 from app.errors import register_exception_handlers
+from app.observability import initialize_sentry
 from app.request_id import attach_request_id_middleware
 
 logging.basicConfig(
@@ -35,6 +36,8 @@ def create_app() -> FastAPI:
 
     app.state.settings = settings
 
+    initialize_sentry(settings)
+
     register_exception_handlers(app)
 
     # Versioned API router for forward compatibility.
@@ -49,6 +52,8 @@ def create_app() -> FastAPI:
             'openai_chat_model': settings.openai_chat_model,
             'openai_embedding_model': settings.openai_embedding_model,
             'langchain_tracing_v2': settings.langchain_tracing_v2,
+            'sentry_enabled': settings.sentry_enabled,
+            'chroma_collection_name': settings.chroma_collection_name,
         },
     )
 
