@@ -78,6 +78,8 @@ def test_settings_apply_llm_synthesis_defaults(monkeypatch: pytest.MonkeyPatch) 
     assert settings.ai_llm_synthesis_max_tokens == 220
     assert settings.ai_llm_synthesis_temperature == 0.2
     assert settings.ai_llm_synthesis_top_n_products == 3
+    assert settings.ai_semantic_min_score == 0.72
+    assert settings.ai_semantic_relative_floor == 0.88
 
 
 @pytest.mark.parametrize(
@@ -87,6 +89,8 @@ def test_settings_apply_llm_synthesis_defaults(monkeypatch: pytest.MonkeyPatch) 
         ('AI_LLM_SYNTHESIS_MAX_TOKENS', '999'),
         ('AI_LLM_SYNTHESIS_TEMPERATURE', '1.5'),
         ('AI_LLM_SYNTHESIS_TOP_N_PRODUCTS', '0'),
+        ('AI_SEMANTIC_MIN_SCORE', '1.1'),
+        ('AI_SEMANTIC_RELATIVE_FLOOR', '-0.1'),
     ],
 )
 def test_settings_reject_invalid_llm_synthesis_ranges(

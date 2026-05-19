@@ -52,3 +52,11 @@ def test_parse_intent_preserves_premium_semantic_signal_with_structured_filters(
     assert result.filters.category == 'tops'
     assert result.filters.price_max_cents == 8000
     assert 'premium' in result.semantic_query.lower()
+
+
+def test_parse_intent_normalizes_hyphenated_stock_phrases() -> None:
+    result = parse_intent('show in-stock tops')
+
+    assert result.mode == RETRIEVAL_MODE_STRUCTURED
+    assert result.filters.category == 'tops'
+    assert result.filters.availability is True

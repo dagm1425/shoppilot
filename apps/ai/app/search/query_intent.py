@@ -50,7 +50,8 @@ _NOISE_PATTERN = re.compile(
 
 
 def parse_intent(message: str) -> ParsedIntent:
-    lowered = message.lower()
+    normalized_message = _normalize_message(message)
+    lowered = normalized_message.lower()
 
     category = None
     if _contains_any_term(lowered, _TOP_CATEGORY_TERMS):
@@ -61,15 +62,15 @@ def parse_intent(message: str) -> ParsedIntent:
     price_min_cents = None
     price_max_cents = None
 
-    between_match = _BETWEEN_PATTERN.search(message)
+    between_match = _BETWEEN_PATTERN.search(normalized_message)
     if between_match:
         first = _to_cents(between_match.group(1))
         second = _to_cents(between_match.group(2))
         price_min_cents = min(first, second)
         price_max_cents = max(first, second)
     else:
-        under_match = _UNDER_PATTERN.search(message)
-        over_match = _OVER_PATTERN.search(message)
+        under_match = _UNDER_PATTERN.search(normalized_message)
+        over_match = _OVER_PATTERN.search(normalized_message)
         if under_match:
             price_max_cents = _to_cents(under_match.group(1))
         if over_match:
@@ -82,7 +83,7 @@ def parse_intent(message: str) -> ParsedIntent:
         availability = False
 
     min_rating = None
-    rating_match = _RATING_PATTERN.search(message)
+    rating_match = _RATING_PATTERN.search(normalized_message)
     if rating_match:
         min_rating = max(0.0, min(5.0, float(rating_match.group(1))))
 
@@ -94,7 +95,7 @@ def parse_intent(message: str) -> ParsedIntent:
         min_rating=min_rating,
     )
 
-    semantic_query = _NOISE_PATTERN.sub(' ', message).strip()
+    semantic_query = _NOISE_PATTERN.sub(' ', normalized_message).strip()
     semantic_query = re.sub(r'\s{2,}', ' ', semantic_query)
     has_semantic_intent = len(semantic_query) >= 6
     has_filters = filters.count() > 0
@@ -105,10 +106,10 @@ def parse_intent(message: str) -> ParsedIntent:
         mode = RETRIEVAL_MODE_STRUCTURED
     else:
         mode = RETRIEVAL_MODE_SEMANTIC
-        semantic_query = message.strip()
+        semantic_query = normalized_message.strip()
 
     if semantic_query == '':
-        semantic_query = message.strip()
+        semantic_query = normalized_message.strip()
 
     return ParsedIntent(mode=mode, semantic_query=semantic_query, filters=filters)
 
@@ -119,3 +120,10 @@ def _to_cents(raw: str) -> int:
 
 def _contains_any_term(text: str, terms: tuple[str, ...]) -> bool:
     return any(re.search(rf'\b{re.escape(term)}\b', text) for term in terms)
+
+
+def _normalize_message(message: str) -> str:
+    normalized = re.sub(r'out[-\s]?of[-\s]?stock', 'out of stock', message, flags=re.IGNORECASE)
+    normalized = re.sub(r'in[-\s]?stock', 'in stock', normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r'\s{2,}', ' ', normalized)
+    return normalized.strip()

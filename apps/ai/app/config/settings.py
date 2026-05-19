@@ -62,6 +62,18 @@ class AppSettings(BaseSettings):
     )
     ai_search_top_k: int = Field(default=5, ge=1, le=20, validation_alias='AI_SEARCH_TOP_K')
     ai_hybrid_candidate_limit: int = Field(default=200, ge=1, le=5000, validation_alias='AI_HYBRID_CANDIDATE_LIMIT')
+    ai_semantic_min_score: float = Field(
+        default=0.72,
+        ge=0,
+        le=1,
+        validation_alias='AI_SEMANTIC_MIN_SCORE',
+    )
+    ai_semantic_relative_floor: float = Field(
+        default=0.88,
+        ge=0,
+        le=1,
+        validation_alias='AI_SEMANTIC_RELATIVE_FLOOR',
+    )
     ai_llm_synthesis_enabled: bool = Field(default=True, validation_alias='AI_LLM_SYNTHESIS_ENABLED')
     ai_llm_synthesis_timeout_ms: int = Field(
         default=8000,

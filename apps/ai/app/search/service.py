@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.config.settings import AppSettings
@@ -24,6 +25,8 @@ class SemanticSearchService:
         self._settings = settings
         self._top_k = settings.ai_search_top_k
         self._hybrid_candidate_limit = settings.ai_hybrid_candidate_limit
+        self._semantic_min_score = settings.ai_semantic_min_score
+        self._semantic_relative_floor = settings.ai_semantic_relative_floor
         self._repository = ProductRepository(database_url=settings.database_url)
         self._embedding_client: EmbeddingClient | None = None
         self._vector_store: ProductVectorStore | None = None
@@ -73,6 +76,11 @@ class SemanticSearchService:
             SearchHit(product_id=product.product_id, similarity_score=_rank_score(index))
             for index, product in enumerate(products)
         ]
+        products, hits = _apply_gender_constraint(
+            products=products,
+            hits=hits,
+            semantic_query=intent.semantic_query,
+        )
         return RetrievalResult(
             mode=intent.mode,
             filters=intent.filters,
@@ -84,9 +92,25 @@ class SemanticSearchService:
 
     def _semantic_retrieval(self, intent: ParsedIntent, *, top_k: int) -> RetrievalResult:
         query_embedding = self._get_embedding_client().embed_text(intent.semantic_query)
+        min_score, relative_floor = _resolve_semantic_thresholds(
+            retrieval_mode=intent.mode,
+            structured_filter_count=intent.filters.count(),
+            base_min_score=self._semantic_min_score,
+            base_relative_floor=self._semantic_relative_floor,
+        )
         hits = self._get_vector_store().query(query_embedding=query_embedding, top_k=top_k, where=None)
-        products = self._hydrate_products(hits)
-        hydrated_hits = _hydrate_hits(products=products, hits=hits)
+        strong_hits = _filter_semantic_hits(
+            hits=hits,
+            min_score=min_score,
+            relative_floor=relative_floor,
+        )
+        products = self._hydrate_products(strong_hits)
+        hydrated_hits = _hydrate_hits(products=products, hits=strong_hits)
+        products, hydrated_hits = _apply_gender_constraint(
+            products=products,
+            hits=hydrated_hits,
+            semantic_query=intent.semantic_query,
+        )
         return RetrievalResult(
             mode=intent.mode,
             filters=intent.filters,
@@ -113,25 +137,40 @@ class SemanticSearchService:
 
         where = _build_vector_where(filters=intent.filters, candidate_ids=candidate_ids)
         query_embedding = self._get_embedding_client().embed_text(intent.semantic_query)
+        min_score, relative_floor = _resolve_semantic_thresholds(
+            retrieval_mode=intent.mode,
+            structured_filter_count=intent.filters.count(),
+            base_min_score=self._semantic_min_score,
+            base_relative_floor=self._semantic_relative_floor,
+        )
         hits = self._get_vector_store().query(query_embedding=query_embedding, top_k=top_k, where=where)
 
-        if not hits:
-            products = self._repository.get_products_by_ids(candidate_ids[:top_k])
-            fallback_hits = [
-                SearchHit(product_id=product.product_id, similarity_score=_rank_score(index))
-                for index, product in enumerate(products)
-            ]
+        strong_hits = _filter_semantic_hits(
+            hits=hits,
+            min_score=min_score,
+            relative_floor=relative_floor,
+        )
+        if not strong_hits:
+            if intent.filters.count() > 0:
+                # Hybrid rescue: when semantic gating over-prunes, return deterministic
+                # structured results instead of empty.
+                return self._structured_retrieval(intent, top_k=top_k)
             return RetrievalResult(
                 mode=intent.mode,
                 filters=intent.filters,
                 semantic_query=intent.semantic_query,
-                hits=fallback_hits,
-                products=products,
+                hits=[],
+                products=[],
                 candidate_count=len(candidate_ids),
             )
 
-        products = self._hydrate_products(hits)
-        hydrated_hits = _hydrate_hits(products=products, hits=hits)
+        products = self._hydrate_products(strong_hits)
+        hydrated_hits = _hydrate_hits(products=products, hits=strong_hits)
+        products, hydrated_hits = _apply_gender_constraint(
+            products=products,
+            hits=hydrated_hits,
+            semantic_query=intent.semantic_query,
+        )
         return RetrievalResult(
             mode=intent.mode,
             filters=intent.filters,
@@ -168,15 +207,15 @@ class SemanticSearchService:
 
 
 def _build_vector_where(filters: RetrievalFilters, candidate_ids: list[str]) -> dict[str, Any]:
-    where: dict[str, Any] = {
-        'product_id': {'$in': candidate_ids},
-    }
+    conditions: list[dict[str, Any]] = [
+        {'product_id': {'$in': candidate_ids}},
+    ]
 
     if filters.category:
-        where['category'] = {'$eq': filters.category}
+        conditions.append({'category': {'$eq': filters.category}})
 
     if filters.availability is not None:
-        where['availability'] = {'$eq': filters.availability}
+        conditions.append({'availability': {'$eq': filters.availability}})
 
     price_range: dict[str, int] = {}
     if filters.price_min_cents is not None:
@@ -184,12 +223,15 @@ def _build_vector_where(filters: RetrievalFilters, candidate_ids: list[str]) -> 
     if filters.price_max_cents is not None:
         price_range['$lte'] = filters.price_max_cents
     if price_range:
-        where['price'] = price_range
+        conditions.append({'price': price_range})
 
     if filters.min_rating is not None:
-        where['rating'] = {'$gte': filters.min_rating}
+        conditions.append({'rating': {'$gte': filters.min_rating}})
 
-    return where
+    # If only one condition, return it directly; otherwise wrap with $and
+    if len(conditions) == 1:
+        return conditions[0]
+    return {'$and': conditions}
 
 
 def _hydrate_hits(*, products: list[ProductRecord], hits: list[SearchHit]) -> list[SearchHit]:
@@ -203,3 +245,90 @@ def _hydrate_hits(*, products: list[ProductRecord], hits: list[SearchHit]) -> li
 
 def _rank_score(index: int) -> float:
     return max(0.0, round(1.0 - (index * 0.08), 4))
+
+
+def _filter_semantic_hits(
+    *,
+    hits: list[SearchHit],
+    min_score: float,
+    relative_floor: float,
+) -> list[SearchHit]:
+    if not hits:
+        return []
+
+    strongest_score = max(hit.similarity_score for hit in hits)
+    dynamic_floor = max(min_score, strongest_score * relative_floor)
+    return [
+        hit
+        for hit in hits
+        if hit.similarity_score >= dynamic_floor
+    ]
+
+
+def _resolve_semantic_thresholds(
+    *,
+    retrieval_mode: RetrievalMode,
+    structured_filter_count: int,
+    base_min_score: float,
+    base_relative_floor: float,
+) -> tuple[float, float]:
+    # For structured-heavy hybrid queries, structured filters already provide the precision boundary.
+    # Bypassing semantic thresholds avoids over-pruning valid matches.
+    if retrieval_mode == RETRIEVAL_MODE_HYBRID and structured_filter_count >= 3:
+        return 0.0, 0.0
+
+    # For lighter hybrid queries (two structured filters), keep semantic guidance but
+    # relax thresholds to reduce phrasing-sensitivity failures.
+    if retrieval_mode == RETRIEVAL_MODE_HYBRID and structured_filter_count == 2:
+        return max(0.0, base_min_score * 0.85), max(0.0, base_relative_floor * 0.90)
+
+    return base_min_score, base_relative_floor
+
+
+def _apply_gender_constraint(
+    *,
+    products: list[ProductRecord],
+    hits: list[SearchHit],
+    semantic_query: str,
+) -> tuple[list[ProductRecord], list[SearchHit]]:
+    gender_constraint = _infer_gender_from_query(semantic_query)
+    if gender_constraint is None:
+        return products, hits
+
+    score_by_id = {hit.product_id: hit.similarity_score for hit in hits}
+    filtered_products = [
+        product
+        for product in products
+        if _matches_gender_constraint(product.gender, gender_constraint)
+    ]
+    filtered_hits = [
+        SearchHit(
+            product_id=product.product_id,
+            similarity_score=score_by_id.get(product.product_id, 0.0),
+        )
+        for product in filtered_products
+    ]
+    return filtered_products, filtered_hits
+
+
+def _infer_gender_from_query(query: str) -> str | None:
+    lowered = query.lower()
+    if re.search(r"\b(unisex)\b", lowered):
+        return 'unisex'
+    if re.search(r"\b(men|mens|men's|male)\b", lowered):
+        return 'male'
+    if re.search(r"\b(women|womens|women's|female)\b", lowered):
+        return 'female'
+    return None
+
+
+def _matches_gender_constraint(raw_gender: str, constraint: str) -> bool:
+    normalized = raw_gender.strip().lower()
+
+    if constraint == 'male':
+        return normalized in {'male', 'men', 'mens', 'unisex'}
+    if constraint == 'female':
+        return normalized in {'female', 'women', 'womens', 'unisex'}
+    if constraint == 'unisex':
+        return normalized == 'unisex'
+    return True
