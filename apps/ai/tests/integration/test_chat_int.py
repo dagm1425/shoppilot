@@ -5,7 +5,15 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from app.graph.workflow import AssistantGraphWorkflow
 from app.schemas import ChatRequest, ChatResponse, FinalRecommendation, ProductItem
+from app.schemas import (
+    CompareItemsToolOutput,
+    GetItemDetailsToolOutput,
+    NormalizedFilters,
+    SearchItemsToolOutput,
+    SearchResult,
+)
 
 
 class _StubWorkflow:
@@ -19,6 +27,82 @@ class _StubWorkflow:
         response.request_id = payload.request_id
         response.session_id = payload.session_id
         return response
+
+
+class _NoopSynthesizer:
+    provider = 'gemini'
+    enabled = False
+
+    def synthesize(self, **kwargs):  # noqa: ANN003, ANN204
+        raise RuntimeError('disabled')
+
+
+class _WorkflowTools:
+    def __init__(self) -> None:
+        self.search_calls = 0
+        self.search_inputs: list[object] = []
+
+        self._product_a = ProductItem(
+            product_id='essential-cropped-tee',
+            name='Essential Cropped Tee',
+            category='tops',
+            price_cents=2400,
+            currency='USD',
+            available=True,
+            rating=4.8,
+            short_description='Soft cropped tee',
+        )
+        self._product_b = ProductItem(
+            product_id='pro-performance-tank',
+            name='Pro Performance Tank',
+            category='tops',
+            price_cents=7600,
+            currency='USD',
+            available=True,
+            rating=4.6,
+            short_description='Premium performance tank',
+        )
+
+    def search_items(self, payload):
+        self.search_calls += 1
+        self.search_inputs.append(payload)
+
+        if self.search_calls == 1:
+            return SearchItemsToolOutput(
+                retrieval_mode='structured',
+                semantic_query='in stock tops',
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    price_max_cents=8000,
+                    availability=True,
+                    min_rating=4.0,
+                ),
+                items=[SearchResult(product=self._product_a, similarity_score=0.95)],
+                total_matches=1,
+            )
+
+        return SearchItemsToolOutput(
+            retrieval_mode='hybrid',
+            semantic_query='for men premium',
+            normalized_filters=NormalizedFilters(
+                category='tops',
+                price_min_cents=5000,
+                availability=True,
+                min_rating=4.0,
+            ),
+            items=[SearchResult(product=self._product_b, similarity_score=0.93)],
+            total_matches=1,
+        )
+
+    def get_item_details(self, payload) -> GetItemDetailsToolOutput:
+        if payload.product_id == self._product_a.product_id:
+            return GetItemDetailsToolOutput(item=self._product_a)
+        if payload.product_id == self._product_b.product_id:
+            return GetItemDetailsToolOutput(item=self._product_b)
+        return GetItemDetailsToolOutput(item=None)
+
+    def compare_items(self, payload) -> CompareItemsToolOutput:
+        return CompareItemsToolOutput(summary='Compared selected products.', compared_items=[])
 
 
 def _recommended_response() -> ChatResponse:
@@ -186,6 +270,50 @@ def test_chat_request_id_header_is_echoed_from_inbound_header(
     assert response.status_code == 200
     assert response.headers.get('x-request-id') == 'external-request-id'
     assert len(stub_workflow.calls) == 1
+
+
+def test_chat_follow_up_refinement_in_same_session_updates_recommendations(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = _WorkflowTools()
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_NoopSynthesizer(),
+        model_name='gemini-2.5-flash',
+    )
+    monkeypatch.setattr('app.services.chat_service.get_assistant_workflow', lambda: workflow)
+
+    first_response = client.post(
+        '/ai/chat',
+        json={
+            'message': 'Show me in-stock tops under $80 with rating at least 4.',
+            'sessionId': 'session-follow-up',
+            'userContext': {'userId': 'user-1'},
+            'requestId': 'request-follow-up-1',
+        },
+    )
+    second_response = client.post(
+        '/ai/chat',
+        json={
+            'message': 'Make those for men and premium',
+            'sessionId': 'session-follow-up',
+            'userContext': {'userId': 'user-1'},
+            'requestId': 'request-follow-up-2',
+        },
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    first_payload = first_response.json()
+    second_payload = second_response.json()
+    assert first_payload['recommendedProductIds'] == ['essential-cropped-tee']
+    assert second_payload['recommendedProductIds'] == ['pro-performance-tank']
+    assert tools.search_calls == 2
+
+    second_call_input = tools.search_inputs[1]
+    assert second_call_input.price_min_cents == 5000
+    assert second_call_input.price_max_cents is None
 
 
 def test_chat_versioned_route_returns_same_contract(

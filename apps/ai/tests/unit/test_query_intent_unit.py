@@ -43,3 +43,12 @@ def test_parse_intent_parses_between_and_rating_constraints() -> None:
     assert result.filters.price_min_cents == 2000
     assert result.filters.price_max_cents == 4000
     assert result.filters.min_rating == 4.5
+
+
+def test_parse_intent_preserves_premium_semantic_signal_with_structured_filters() -> None:
+    result = parse_intent('show tops under 80 dollars premium quality')
+
+    assert result.mode == RETRIEVAL_MODE_HYBRID
+    assert result.filters.category == 'tops'
+    assert result.filters.price_max_cents == 8000
+    assert 'premium' in result.semantic_query.lower()

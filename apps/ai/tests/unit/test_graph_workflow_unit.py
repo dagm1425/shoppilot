@@ -125,11 +125,17 @@ def _product(*, product_id: str, name: str, category: str, price_cents: int) -> 
     )
 
 
-def _search_output(*, retrieval_mode: str, items: list[ProductItem]) -> SearchItemsToolOutput:
+def _search_output(
+    *,
+    retrieval_mode: str,
+    items: list[ProductItem],
+    semantic_query: str = 'breathable workout tops',
+    normalized_filters: NormalizedFilters | None = None,
+) -> SearchItemsToolOutput:
     return SearchItemsToolOutput(
         retrieval_mode=retrieval_mode,
-        semantic_query='breathable workout tops',
-        normalized_filters=NormalizedFilters(category='tops', availability=True),
+        semantic_query=semantic_query,
+        normalized_filters=normalized_filters or NormalizedFilters(category='tops', availability=True),
         items=[
             SearchResult(product=item, similarity_score=0.95 - (index * 0.05))
             for index, item in enumerate(items)
@@ -390,3 +396,225 @@ def test_workflow_keeps_deterministic_output_when_synthesis_fails() -> None:
         'Want options in a different price range?',
         'Should I focus on in-stock items only?',
     ]
+
+
+def test_workflow_turn_two_refinement_triggers_fresh_retrieval() -> None:
+    first = _product(
+        product_id='essential-cropped-tee',
+        name='Essential Cropped Tee',
+        category='tops',
+        price_cents=2400,
+    )
+    second = _product(
+        product_id='pro-performance-tank',
+        name='Pro Performance Tank',
+        category='tops',
+        price_cents=7600,
+    )
+    tools = _StubTools(
+        search_plan=[
+            _search_output(
+                retrieval_mode='structured',
+                items=[first],
+                semantic_query='show in stock tops',
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    price_max_cents=8000,
+                    availability=True,
+                    min_rating=4.0,
+                ),
+            ),
+            _search_output(
+                retrieval_mode='hybrid',
+                items=[second],
+                semantic_query='for men premium',
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    price_min_cents=5000,
+                    availability=True,
+                    min_rating=4.0,
+                ),
+            ),
+        ],
+        product_map={
+            first.product_id: first,
+            second.product_id: second,
+        },
+    )
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        model_name='gpt-4.1-mini',
+    )
+
+    first_turn = workflow.run(
+        _chat_payload(
+            message='Show me in-stock tops under $80 with rating at least 4.',
+            session_id='session-refine',
+            request_id='request-refine-1',
+            user_id='user-1',
+        )
+    )
+    second_turn = workflow.run(
+        _chat_payload(
+            message='Make those for men and premium.',
+            session_id='session-refine',
+            request_id='request-refine-2',
+            user_id='user-1',
+        )
+    )
+
+    assert first_turn.recommended_product_ids == ['essential-cropped-tee']
+    assert second_turn.recommended_product_ids == ['pro-performance-tank']
+    assert tools.search_calls == 2
+    second_call_payload = tools.search_inputs[1]
+    assert second_call_payload.price_min_cents == 5000
+    assert second_call_payload.price_max_cents is None
+
+
+def test_workflow_compare_with_refinement_does_not_skip_retrieval() -> None:
+    first = _product(
+        product_id='essential-cropped-tee',
+        name='Essential Cropped Tee',
+        category='tops',
+        price_cents=2400,
+    )
+    second = _product(
+        product_id='pro-performance-tank',
+        name='Pro Performance Tank',
+        category='tops',
+        price_cents=7600,
+    )
+    third = _product(
+        product_id='premium-motion-hoodie',
+        name='Premium Motion Hoodie',
+        category='tops',
+        price_cents=8600,
+    )
+    tools = _StubTools(
+        search_plan=[
+            _search_output(retrieval_mode='hybrid', items=[first, second]),
+            _search_output(retrieval_mode='hybrid', items=[second, third]),
+        ],
+        product_map={
+            first.product_id: first,
+            second.product_id: second,
+            third.product_id: third,
+        },
+    )
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        model_name='gpt-4.1-mini',
+    )
+
+    workflow.run(
+        _chat_payload(
+            message='find breathable training tops under 60',
+            session_id='session-compare-refine',
+            request_id='request-compare-refine-1',
+            user_id='user-1',
+        )
+    )
+    workflow.run(
+        _chat_payload(
+            message='compare those, but make them premium',
+            session_id='session-compare-refine',
+            request_id='request-compare-refine-2',
+            user_id='user-1',
+        )
+    )
+
+    assert tools.search_calls == 2
+    assert len(tools.compare_calls) == 1
+
+
+def test_workflow_third_turn_uses_latest_state_not_first_turn_state() -> None:
+    first = _product(
+        product_id='essential-cropped-tee',
+        name='Essential Cropped Tee',
+        category='tops',
+        price_cents=2400,
+    )
+    second = _product(
+        product_id='pro-performance-tank',
+        name='Pro Performance Tank',
+        category='tops',
+        price_cents=7600,
+    )
+    third = _product(
+        product_id='lightweight-elite-tee',
+        name='Lightweight Elite Tee',
+        category='tops',
+        price_cents=7200,
+    )
+    tools = _StubTools(
+        search_plan=[
+            _search_output(
+                retrieval_mode='structured',
+                items=[first],
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    price_max_cents=8000,
+                ),
+            ),
+            _search_output(
+                retrieval_mode='hybrid',
+                items=[second],
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    price_min_cents=5000,
+                ),
+            ),
+            _search_output(
+                retrieval_mode='hybrid',
+                items=[third],
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    price_min_cents=5000,
+                    availability=True,
+                ),
+            ),
+        ],
+        product_map={
+            first.product_id: first,
+            second.product_id: second,
+            third.product_id: third,
+        },
+    )
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        model_name='gpt-4.1-mini',
+    )
+
+    workflow.run(
+        _chat_payload(
+            message='Show me tops under $80.',
+            session_id='session-latest-state',
+            request_id='request-latest-state-1',
+            user_id='user-1',
+        )
+    )
+    workflow.run(
+        _chat_payload(
+            message='Make those premium.',
+            session_id='session-latest-state',
+            request_id='request-latest-state-2',
+            user_id='user-1',
+        )
+    )
+    workflow.run(
+        _chat_payload(
+            message='Also keep only in stock options.',
+            session_id='session-latest-state',
+            request_id='request-latest-state-3',
+            user_id='user-1',
+        )
+    )
+
+    assert tools.search_calls == 3
+    third_call_payload = tools.search_inputs[2]
+    assert third_call_payload.price_min_cents == 5000
+    assert third_call_payload.price_max_cents is None
+    assert third_call_payload.availability is True

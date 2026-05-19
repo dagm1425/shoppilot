@@ -29,6 +29,14 @@ from app.schemas import (
     SearchItemsToolOutput,
 )
 from app.search.query_intent import parse_intent
+from app.search.refinement import (
+    apply_filter_refinement,
+    build_merged_semantic_query,
+    detect_filter_clears,
+    detect_reset_requested,
+    extract_semantic_constraints,
+    merge_semantic_constraints,
+)
 from app.tools import AssistantTools
 
 logger = logging.getLogger(__name__)
@@ -43,6 +51,9 @@ class AssistantGraphState(TypedDict, total=False):
     user_id: str
     thread_id: str
     semantic_query: str
+    merged_semantic_query: str
+    semantic_facets: dict[str, str]
+    semantic_terms: list[str]
     retrieval_mode: Literal['structured', 'semantic', 'hybrid']
     normalized_filters: dict[str, Any]
     tool_output: dict[str, Any]
@@ -51,6 +62,7 @@ class AssistantGraphState(TypedDict, total=False):
     prior_recommended_product_ids: list[str]
     comparison_requested: bool
     skip_retrieval: bool
+    reset_requested: bool
     comparison_summary: str | None
     retry_count: int
     validation_error: str | None
@@ -124,47 +136,137 @@ class AssistantGraphWorkflow:
         intent = parse_intent(state['query'])
         lowered_query = state['query'].lower()
         prior_recommended_ids = list(state.get('recommended_product_ids', []))
-
-        comparison_requested = any(
-            token in lowered_query
-            for token in ('compare', 'comparison', 'versus', 'vs ')
+        has_memory_context = (
+            'normalized_filters' in state
+            or 'semantic_facets' in state
+            or 'semantic_terms' in state
+            or len(prior_recommended_ids) > 0
         )
-        skip_retrieval = comparison_requested and len(prior_recommended_ids) >= 2
+        reset_requested = detect_reset_requested(state['query'])
+        clear_fields = detect_filter_clears(state['query'])
 
-        normalized_filters = {
+        prior_filters: dict[str, Any] = {}
+        if has_memory_context and not reset_requested:
+            prior_filters = {
+                'category': state.get('normalized_filters', {}).get('category'),
+                'priceMinCents': state.get('normalized_filters', {}).get('priceMinCents'),
+                'priceMaxCents': state.get('normalized_filters', {}).get('priceMaxCents'),
+                'availability': state.get('normalized_filters', {}).get('availability'),
+                'minRating': state.get('normalized_filters', {}).get('minRating'),
+            }
+
+        current_facets, current_terms = extract_semantic_constraints(state['query'])
+        semantic_merge = merge_semantic_constraints(
+            prior_facets=state.get('semantic_facets', {}),
+            prior_terms=state.get('semantic_terms', []),
+            current_facets=current_facets,
+            current_terms=current_terms,
+            reset_requested=reset_requested,
+        )
+
+        explicit_filters = {
             'category': intent.filters.category,
             'priceMinCents': intent.filters.price_min_cents,
             'priceMaxCents': intent.filters.price_max_cents,
             'availability': intent.filters.availability,
             'minRating': intent.filters.min_rating,
         }
+        filter_merge = apply_filter_refinement(
+            prior_filters=prior_filters,
+            explicit_filters=explicit_filters,
+            clear_fields=clear_fields,
+            facets=current_facets,
+            has_memory=has_memory_context and not reset_requested,
+        )
+        merged_semantic_query = build_merged_semantic_query(
+            facets=semantic_merge.facets,
+            terms=semantic_merge.terms,
+            fallback_query=intent.semantic_query,
+        )
+
+        comparison_requested = any(
+            token in lowered_query
+            for token in ('compare', 'comparison', 'versus', 'vs ')
+        )
+        refinement_delta = (
+            reset_requested
+            or len(filter_merge.changed_filter_keys) > 0
+            or len(semantic_merge.changed_facet_groups) > 0
+            or semantic_merge.terms_changed
+            or len(clear_fields) > 0
+        )
+        skip_retrieval = (
+            comparison_requested
+            and len(prior_recommended_ids) >= 2
+            and not refinement_delta
+        )
+
+        normalized_filters = filter_merge.filters
+        retrieval_mode = _derive_retrieval_mode(
+            normalized_filters=normalized_filters,
+            semantic_query=merged_semantic_query,
+        )
+
+        if reset_requested:
+            logger.info(
+                {
+                    'event': 'ai.graph.refinement_reset',
+                    'request_id': state['request_id'],
+                    'thread_id': state['thread_id'],
+                },
+            )
+
+        logger.info(
+            {
+                'event': 'ai.graph.refinement_applied',
+                'request_id': state['request_id'],
+                'thread_id': state['thread_id'],
+                'changed_filter_keys': sorted(filter_merge.changed_filter_keys),
+                'changed_facet_groups': sorted(semantic_merge.changed_facet_groups),
+                'implicit_filter_keys': sorted(filter_merge.implicit_filter_keys),
+                'compare_only': skip_retrieval,
+                'ai_retrieval_mode': retrieval_mode,
+            },
+        )
 
         logger.info(
             {
                 'event': 'ai.graph.query_planned',
                 'request_id': state['request_id'],
                 'thread_id': state['thread_id'],
-                'ai_retrieval_mode': intent.mode,
+                'ai_retrieval_mode': retrieval_mode,
                 'comparison_requested': comparison_requested,
                 'skip_retrieval': skip_retrieval,
             },
         )
 
+        if reset_requested:
+            prior_recommended_ids = []
+
         return {
-            'semantic_query': intent.semantic_query,
-            'retrieval_mode': intent.mode,
+            'semantic_query': merged_semantic_query,
+            'merged_semantic_query': merged_semantic_query,
+            'semantic_facets': semantic_merge.facets,
+            'semantic_terms': semantic_merge.terms,
+            'retrieval_mode': retrieval_mode,
             'normalized_filters': normalized_filters,
             'comparison_requested': comparison_requested,
             'prior_recommended_product_ids': prior_recommended_ids,
             'skip_retrieval': skip_retrieval,
+            'reset_requested': reset_requested,
             'validation_error': None,
         }
 
     def _product_retrieval_node(self, state: AssistantGraphState) -> AssistantGraphState:
+        retrieval_query = (
+            state.get('merged_semantic_query')
+            or state.get('semantic_query')
+            or state['query']
+        )
         try:
             tool_input = SearchItemsToolInput.model_validate(
                 {
-                    'query': state['query'],
+                    'query': retrieval_query,
                     'retrievalMode': state['retrieval_mode'],
                     'topK': 5,
                     'category': state.get('normalized_filters', {}).get('category'),
@@ -209,6 +311,7 @@ class AssistantGraphWorkflow:
             'tool_output': tool_output.model_dump(by_alias=True),
             'retrieval_mode': tool_output.retrieval_mode,
             'semantic_query': tool_output.semantic_query,
+            'merged_semantic_query': state.get('merged_semantic_query', tool_output.semantic_query),
             'normalized_filters': tool_output.normalized_filters.model_dump(by_alias=True),
             'validation_error': None,
         }
@@ -408,6 +511,23 @@ def _route_after_planning(state: AssistantGraphState) -> Literal['product_retrie
     if state.get('skip_retrieval', False):
         return 'final_response'
     return 'product_retrieval'
+
+
+def _derive_retrieval_mode(
+    *,
+    normalized_filters: dict[str, Any],
+    semantic_query: str,
+) -> Literal['structured', 'semantic', 'hybrid']:
+    has_filters = any(
+        normalized_filters.get(key) is not None
+        for key in ('category', 'priceMinCents', 'priceMaxCents', 'availability', 'minRating')
+    )
+    has_semantic_query = semantic_query.strip() != ''
+    if has_filters and has_semantic_query:
+        return 'hybrid'
+    if has_filters:
+        return 'structured'
+    return 'semantic'
 
 
 def _route_after_validation(state: AssistantGraphState) -> Literal['retry_route', 'no_result', 'final_response']:
