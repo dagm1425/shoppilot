@@ -14,5 +14,5 @@ def get_assistant_workflow() -> AssistantGraphWorkflow:
     return AssistantGraphWorkflow(
         tools=get_assistant_tools(),
         synthesizer=get_assistant_synthesizer(),
-        model_name=settings.openai_chat_model,
+        model_name=settings.llm_synthesis_model,
     )

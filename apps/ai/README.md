@@ -60,12 +60,36 @@ Embedding defaults:
 - model: `gemini-embedding-001`
 - base URL: `https://generativelanguage.googleapis.com/v1beta`
 
-## Phase 4.3 synthesis note
+## Use Gemini for LLM synthesis
 
-In Phase 4.3, the graph keeps retrieval/tool orchestration deterministic and adds
-an LLM synthesis step only at final response generation:
+Phase B migrates LLM synthesis from the OpenAI Python client to the official
+Google GenAI SDK (`google-genai`).
+
+Add these synthesis env vars in `apps/ai/.env`:
+
+```bash
+LLM_SYNTHESIS_PROVIDER=gemini
+LLM_SYNTHESIS_API_KEY=your-gemini-api-key
+LLM_SYNTHESIS_MODEL=gemini-2.5-flash
+LLM_SYNTHESIS_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+```
+
+Temporary backward-compatible synthesis aliases are still accepted:
+
+```bash
+# Deprecated synthesis aliases (transition window only):
+# OPENAI_API_KEY=...
+# OPENAI_BASE_URL=...
+# OPENAI_CHAT_MODEL=...
+```
+
+If deprecated aliases are used, the service logs a startup warning.
+
+## Synthesis and retrieval boundaries
 
 - retrieval and product ranking remain tool-driven
-- synthesis rewrites user-facing `assistantMessage` and `followUpPrompts`
+- LLM synthesis rewrites user-facing `assistantMessage` and `followUpPrompts`
 - synthesis failure falls back to deterministic graph messaging
-- synthesis provider migration is intentionally deferred to a separate Phase B change
+- embedding path stays explicitly Gemini-based and unchanged by synthesis migration
+
+Migration note: OpenAI synthesis runtime usage has been removed from `apps/ai`.

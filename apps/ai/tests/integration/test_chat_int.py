@@ -124,7 +124,7 @@ def test_chat_returns_typed_recommendation_response(
     assert payload['sessionId'] == 'session-1'
     assert payload['assistantMessage']
     assert payload['placeholder'] is False
-    assert payload['model'] == 'gpt-4.1-mini'
+    assert payload['model'] == 'gemini-2.5-flash'
     assert payload['retrievalMode'] == 'hybrid'
     assert payload['recommendedProductIds'] == ['essential-cropped-tee', 'flow-sports-bra']
     assert len(payload['recommendations']) == 1

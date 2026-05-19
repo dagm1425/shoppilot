@@ -44,7 +44,7 @@ def post_chat(
         },
     )
 
-    return build_chat_response(payload, model_name=settings.openai_chat_model)
+    return build_chat_response(payload, model_name=settings.llm_synthesis_model)
 
 
 @router.post('/ai/chat/stream')
@@ -85,7 +85,7 @@ async def post_chat_stream(
                 )
                 return
 
-            envelope = build_chat_stream_envelope(payload, model_name=settings.openai_chat_model)
+            envelope = build_chat_stream_envelope(payload, model_name=settings.llm_synthesis_model)
             run_id = envelope.run_id
 
             events = build_stream_event_sequence(

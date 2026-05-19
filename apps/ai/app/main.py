@@ -36,6 +36,17 @@ def create_app() -> FastAPI:
 
     app.state.settings = settings
 
+    if settings.llm_synthesis_uses_deprecated_openai_aliases:
+        logger.warning(
+            {
+                'event': 'ai.synthesis_env_deprecated_alias_used',
+                'message': (
+                    'Deprecated OPENAI_* synthesis aliases detected. '
+                    'Switch to LLM_SYNTHESIS_* or GEMINI_* synthesis env variables.'
+                ),
+            },
+        )
+
     initialize_sentry(settings)
 
     register_exception_handlers(app)
@@ -48,8 +59,9 @@ def create_app() -> FastAPI:
     logger.info(
         'ai.service_bootstrap',
         extra={
-            'openai_base_url': str(settings.openai_base_url),
-            'openai_chat_model': settings.openai_chat_model,
+            'llm_synthesis_provider': settings.llm_synthesis_provider,
+            'llm_synthesis_model': settings.llm_synthesis_model,
+            'llm_synthesis_base_url': str(settings.llm_synthesis_base_url),
             'embedding_provider': settings.embedding_provider,
             'embedding_model': settings.embedding_model,
             'embedding_base_url': str(settings.embedding_base_url),

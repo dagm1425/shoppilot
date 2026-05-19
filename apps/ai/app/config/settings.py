@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic import AliasChoices, AnyHttpUrl, Field, SecretStr, model_validator
+from pydantic import AliasChoices, AnyHttpUrl, Field, PrivateAttr, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,9 +16,35 @@ class AppSettings(BaseSettings):
         extra='ignore',
     )
 
-    openai_api_key: SecretStr = Field(validation_alias='OPENAI_API_KEY')
-    openai_base_url: AnyHttpUrl = Field(validation_alias='OPENAI_BASE_URL')
-    openai_chat_model: str = Field(min_length=1, validation_alias='OPENAI_CHAT_MODEL')
+    llm_synthesis_provider: str = Field(
+        default='gemini',
+        min_length=1,
+        validation_alias='LLM_SYNTHESIS_PROVIDER',
+    )
+    llm_synthesis_api_key: SecretStr = Field(
+        validation_alias=AliasChoices(
+            'LLM_SYNTHESIS_API_KEY',
+            'GEMINI_API_KEY',
+            'OPENAI_API_KEY',
+        )
+    )
+    llm_synthesis_base_url: AnyHttpUrl = Field(
+        default='https://generativelanguage.googleapis.com/v1beta',
+        validation_alias=AliasChoices(
+            'LLM_SYNTHESIS_BASE_URL',
+            'GEMINI_BASE_URL',
+            'OPENAI_BASE_URL',
+        ),
+    )
+    llm_synthesis_model: str = Field(
+        default='gemini-2.5-flash',
+        min_length=1,
+        validation_alias=AliasChoices(
+            'LLM_SYNTHESIS_MODEL',
+            'GEMINI_CHAT_MODEL',
+            'OPENAI_CHAT_MODEL',
+        ),
+    )
     embedding_provider: str = Field(default='gemini', min_length=1, validation_alias='EMBEDDING_PROVIDER')
     embedding_api_key: SecretStr = Field(validation_alias='GEMINI_API_KEY')
     embedding_base_url: AnyHttpUrl = Field(
@@ -104,6 +132,7 @@ class AppSettings(BaseSettings):
         le=1,
         validation_alias='SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE',
     )
+    _llm_synthesis_uses_deprecated_openai_aliases: bool = PrivateAttr(default=False)
 
     @model_validator(mode='after')
     def validate_langsmith_requirements(self) -> 'AppSettings':
@@ -135,6 +164,73 @@ class AppSettings(BaseSettings):
 
         self.embedding_provider = provider
         return self
+
+    @model_validator(mode='after')
+    def validate_llm_synthesis_provider(self) -> 'AppSettings':
+        provider = self.llm_synthesis_provider.strip().lower()
+        if provider != 'gemini':
+            raise ValueError('LLM_SYNTHESIS_PROVIDER must be "gemini" in Phase B.')
+
+        self.llm_synthesis_provider = provider
+        self._llm_synthesis_uses_deprecated_openai_aliases = _uses_deprecated_openai_synthesis_aliases()
+        return self
+
+    @property
+    def llm_synthesis_uses_deprecated_openai_aliases(self) -> bool:
+        return self._llm_synthesis_uses_deprecated_openai_aliases
+
+
+def _uses_deprecated_openai_synthesis_aliases() -> bool:
+    dotenv_values = _read_env_file_values(Path('.env'))
+
+    def has_value(key: str) -> bool:
+        env_value = os.environ.get(key)
+        if isinstance(env_value, str) and env_value.strip() != '':
+            return True
+
+        file_value = dotenv_values.get(key)
+        if isinstance(file_value, str) and file_value.strip() != '':
+            return True
+
+        return False
+
+    uses_openai_api_key_alias = (
+        has_value('OPENAI_API_KEY')
+        and not has_value('LLM_SYNTHESIS_API_KEY')
+        and not has_value('GEMINI_API_KEY')
+    )
+    uses_openai_base_url_alias = (
+        has_value('OPENAI_BASE_URL')
+        and not has_value('LLM_SYNTHESIS_BASE_URL')
+        and not has_value('GEMINI_BASE_URL')
+    )
+    uses_openai_model_alias = (
+        has_value('OPENAI_CHAT_MODEL')
+        and not has_value('LLM_SYNTHESIS_MODEL')
+        and not has_value('GEMINI_CHAT_MODEL')
+    )
+
+    return (
+        uses_openai_api_key_alias
+        or uses_openai_base_url_alias
+        or uses_openai_model_alias
+    )
+
+
+def _read_env_file_values(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if line == '' or line.startswith('#') or '=' not in line:
+            continue
+
+        key, value = line.split('=', 1)
+        values[key.strip()] = value.strip()
+
+    return values
 
 
 @lru_cache(maxsize=1)

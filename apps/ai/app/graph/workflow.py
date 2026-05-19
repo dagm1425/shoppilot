@@ -326,6 +326,8 @@ class AssistantGraphWorkflow:
                     'request_id': state['request_id'],
                     'thread_id': state['thread_id'],
                     'ai_retrieval_mode': state.get('retrieval_mode'),
+                    'llm_provider': self._synthesizer.provider,
+                    'llm_model': self._model_name,
                     'latency_ms': 0,
                     'fallback_reason': 'disabled',
                 },
@@ -338,6 +340,8 @@ class AssistantGraphWorkflow:
                     'request_id': state['request_id'],
                     'thread_id': state['thread_id'],
                     'ai_retrieval_mode': state.get('retrieval_mode'),
+                    'llm_provider': self._synthesizer.provider,
+                    'llm_model': self._model_name,
                 },
             )
 
@@ -359,6 +363,7 @@ class AssistantGraphWorkflow:
                     exc,
                     tags={
                         'ai_component': 'llm_synthesis',
+                        'llm_provider': self._synthesizer.provider,
                         'request_id': state['request_id'],
                         'thread_id': state['thread_id'],
                         'ai_retrieval_mode': str(state.get('retrieval_mode')),
@@ -370,6 +375,8 @@ class AssistantGraphWorkflow:
                         'request_id': state['request_id'],
                         'thread_id': state['thread_id'],
                         'ai_retrieval_mode': state.get('retrieval_mode'),
+                        'llm_provider': self._synthesizer.provider,
+                        'llm_model': self._model_name,
                         'latency_ms': int((perf_counter() - started_at) * 1000),
                         'fallback_reason': type(exc).__name__,
                     },
@@ -381,6 +388,8 @@ class AssistantGraphWorkflow:
                         'request_id': state['request_id'],
                         'thread_id': state['thread_id'],
                         'ai_retrieval_mode': state.get('retrieval_mode'),
+                        'llm_provider': self._synthesizer.provider,
+                        'llm_model': self._model_name,
                         'latency_ms': int((perf_counter() - started_at) * 1000),
                     },
                 )

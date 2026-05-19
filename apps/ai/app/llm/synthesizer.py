@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from openai import OpenAI
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -63,18 +65,18 @@ class AssistantSynthesizer:
     def __init__(
         self,
         *,
-        client: OpenAI,
+        client: genai.Client,
         model_name: str,
+        provider: str,
         enabled: bool,
-        timeout_ms: int,
         max_tokens: int,
         temperature: float,
         top_n_products: int,
     ) -> None:
         self._client = client
         self._model_name = model_name
+        self._provider = provider
         self._enabled = enabled
-        self._timeout_seconds = max(1.0, timeout_ms / 1000.0)
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._top_n_products = top_n_products
@@ -82,6 +84,10 @@ class AssistantSynthesizer:
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    @property
+    def provider(self) -> str:
+        return self._provider
 
     def build_system_prompt(self) -> str:
         return (
@@ -136,18 +142,27 @@ class AssistantSynthesizer:
             comparison_summary=comparison_summary,
         )
 
-        response = self._client.with_options(timeout=self._timeout_seconds).chat.completions.create(
-            model=self._model_name,
-            temperature=self._temperature,
-            max_tokens=self._max_tokens,
-            response_format={'type': 'json_object'},
-            messages=[
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': json.dumps(user_payload, separators=(',', ':'))},
-            ],
-        )
+        prompt_payload = json.dumps(user_payload, separators=(',', ':'))
+        try:
+            response = self._client.models.generate_content(
+                model=self._model_name,
+                contents=prompt_payload,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=self._temperature,
+                    max_output_tokens=self._max_tokens,
+                    response_mime_type='application/json',
+                    response_json_schema=_AssistantSynthesisPayload.model_json_schema(),
+                ),
+            )
+        except genai_errors.APIError as exc:
+            raise RuntimeError(
+                f'Gemini synthesis request failed with API error {exc.code}: {exc.message}'
+            ) from exc
+        except Exception as exc:  # pragma: no cover - fallback for non-API runtime failures
+            raise RuntimeError(f'Gemini synthesis request failed: {exc}') from exc
 
-        content = _extract_message_content(response=response)
+        content = _extract_response_text(response=response)
         parsed = _load_json_payload(content=content)
         payload = _AssistantSynthesisPayload.model_validate(parsed)
         return AssistantSynthesisResult(
@@ -188,13 +203,8 @@ def _trim_products_for_prompt(
     return trimmed
 
 
-def _extract_message_content(*, response: Any) -> str:
-    choices = getattr(response, 'choices', None)
-    if not choices:
-        raise ValueError('No choices returned from LLM synthesis call.')
-
-    message = choices[0].message
-    content = getattr(message, 'content', None)
+def _extract_response_text(*, response: Any) -> str:
+    content = getattr(response, 'text', None)
     if not isinstance(content, str) or content.strip() == '':
         raise ValueError('LLM synthesis returned empty content.')
 

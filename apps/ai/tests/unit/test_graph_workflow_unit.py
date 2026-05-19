@@ -61,10 +61,12 @@ class _StubSynthesizer:
     def __init__(
         self,
         *,
+        provider: str = 'gemini',
         enabled: bool = False,
         result: AssistantSynthesisResult | None = None,
         should_raise: bool = False,
     ) -> None:
+        self.provider = provider
         self.enabled = enabled
         self.result = result
         self.should_raise = should_raise

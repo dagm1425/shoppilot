@@ -10,9 +10,10 @@ from app.config.settings import get_settings
 
 
 def _set_required_env() -> None:
-    os.environ.setdefault('OPENAI_API_KEY', 'test-openai-key')
-    os.environ.setdefault('OPENAI_BASE_URL', 'https://api.openai.com/v1')
-    os.environ.setdefault('OPENAI_CHAT_MODEL', 'gpt-4.1-mini')
+    os.environ.setdefault('LLM_SYNTHESIS_PROVIDER', 'gemini')
+    os.environ.setdefault('LLM_SYNTHESIS_API_KEY', 'test-gemini-synthesis-key')
+    os.environ.setdefault('LLM_SYNTHESIS_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    os.environ.setdefault('LLM_SYNTHESIS_MODEL', 'gemini-2.5-flash')
     os.environ.setdefault('EMBEDDING_PROVIDER', 'gemini')
     os.environ.setdefault('GEMINI_API_KEY', 'test-gemini-key')
     os.environ.setdefault('EMBEDDING_MODEL', 'gemini-embedding-001')

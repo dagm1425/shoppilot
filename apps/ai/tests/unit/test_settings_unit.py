@@ -7,9 +7,10 @@ from app.config.settings import AppSettings
 
 
 def _base_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv('OPENAI_API_KEY', 'test-openai-key')
-    monkeypatch.setenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
-    monkeypatch.setenv('OPENAI_CHAT_MODEL', 'gpt-4.1-mini')
+    monkeypatch.setenv('LLM_SYNTHESIS_PROVIDER', 'gemini')
+    monkeypatch.setenv('LLM_SYNTHESIS_API_KEY', 'test-gemini-synthesis-key')
+    monkeypatch.setenv('LLM_SYNTHESIS_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('LLM_SYNTHESIS_MODEL', 'gemini-2.5-flash')
     monkeypatch.setenv('EMBEDDING_PROVIDER', 'gemini')
     monkeypatch.setenv('GEMINI_API_KEY', 'test-gemini-key')
     monkeypatch.setenv('EMBEDDING_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
@@ -68,6 +69,10 @@ def test_settings_apply_llm_synthesis_defaults(monkeypatch: pytest.MonkeyPatch) 
 
     settings = AppSettings(_env_file=None)
 
+    assert settings.llm_synthesis_provider == 'gemini'
+    assert settings.llm_synthesis_api_key.get_secret_value() == 'test-gemini-synthesis-key'
+    assert str(settings.llm_synthesis_base_url) == 'https://generativelanguage.googleapis.com/v1beta'
+    assert settings.llm_synthesis_model == 'gemini-2.5-flash'
     assert settings.ai_llm_synthesis_enabled is True
     assert settings.ai_llm_synthesis_timeout_ms == 8000
     assert settings.ai_llm_synthesis_max_tokens == 220
@@ -108,9 +113,10 @@ def test_settings_apply_embedding_defaults(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_settings_support_gemini_base_model_alias_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv('OPENAI_API_KEY', 'test-openai-key')
-    monkeypatch.setenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
-    monkeypatch.setenv('OPENAI_CHAT_MODEL', 'gpt-4.1-mini')
+    monkeypatch.setenv('LLM_SYNTHESIS_PROVIDER', 'gemini')
+    monkeypatch.setenv('LLM_SYNTHESIS_API_KEY', 'test-gemini-synthesis-key')
+    monkeypatch.setenv('LLM_SYNTHESIS_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('LLM_SYNTHESIS_MODEL', 'gemini-2.5-flash')
     monkeypatch.setenv('GEMINI_API_KEY', 'test-gemini-key')
     monkeypatch.delenv('EMBEDDING_BASE_URL', raising=False)
     monkeypatch.delenv('EMBEDDING_MODEL', raising=False)
@@ -124,10 +130,53 @@ def test_settings_support_gemini_base_model_alias_fallbacks(monkeypatch: pytest.
     assert settings.embedding_model == 'gemini-embedding-001'
 
 
-def test_settings_reject_legacy_embedding_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settings_support_synthesis_alias_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('LLM_SYNTHESIS_PROVIDER', 'gemini')
+    monkeypatch.delenv('LLM_SYNTHESIS_API_KEY', raising=False)
+    monkeypatch.delenv('LLM_SYNTHESIS_BASE_URL', raising=False)
+    monkeypatch.delenv('LLM_SYNTHESIS_MODEL', raising=False)
+    monkeypatch.setenv('GEMINI_API_KEY', 'test-gemini-key')
+    monkeypatch.setenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('GEMINI_CHAT_MODEL', 'gemini-2.5-flash')
+    monkeypatch.setenv('EMBEDDING_PROVIDER', 'gemini')
+    monkeypatch.setenv('EMBEDDING_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('EMBEDDING_MODEL', 'gemini-embedding-001')
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.llm_synthesis_api_key.get_secret_value() == 'test-gemini-key'
+    assert str(settings.llm_synthesis_base_url) == 'https://generativelanguage.googleapis.com/v1beta'
+    assert settings.llm_synthesis_model == 'gemini-2.5-flash'
+
+
+def test_settings_support_deprecated_openai_synthesis_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('LLM_SYNTHESIS_PROVIDER', 'gemini')
+    monkeypatch.delenv('LLM_SYNTHESIS_API_KEY', raising=False)
+    monkeypatch.delenv('LLM_SYNTHESIS_BASE_URL', raising=False)
+    monkeypatch.delenv('LLM_SYNTHESIS_MODEL', raising=False)
+    monkeypatch.delenv('GEMINI_BASE_URL', raising=False)
+    monkeypatch.delenv('GEMINI_CHAT_MODEL', raising=False)
     monkeypatch.setenv('OPENAI_API_KEY', 'test-openai-key')
     monkeypatch.setenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
     monkeypatch.setenv('OPENAI_CHAT_MODEL', 'gpt-4.1-mini')
+    monkeypatch.setenv('EMBEDDING_PROVIDER', 'gemini')
+    monkeypatch.setenv('GEMINI_API_KEY', 'test-gemini-key')
+    monkeypatch.setenv('EMBEDDING_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('EMBEDDING_MODEL', 'gemini-embedding-001')
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.llm_synthesis_api_key.get_secret_value() == 'test-gemini-key'
+    assert str(settings.llm_synthesis_base_url) == 'https://api.openai.com/v1'
+    assert settings.llm_synthesis_model == 'gpt-4.1-mini'
+    assert settings.llm_synthesis_uses_deprecated_openai_aliases is True
+
+
+def test_settings_reject_legacy_embedding_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('LLM_SYNTHESIS_PROVIDER', 'gemini')
+    monkeypatch.setenv('LLM_SYNTHESIS_API_KEY', 'test-gemini-synthesis-key')
+    monkeypatch.setenv('LLM_SYNTHESIS_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('LLM_SYNTHESIS_MODEL', 'gemini-2.5-flash')
     monkeypatch.setenv('EMBEDDING_PROVIDER', 'gemini')
     monkeypatch.setenv('EMBEDDING_API_KEY', 'legacy-key')
     monkeypatch.setenv('EMBEDDING_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
@@ -141,6 +190,31 @@ def test_settings_reject_legacy_embedding_api_key(monkeypatch: pytest.MonkeyPatc
 def test_settings_reject_unsupported_embedding_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     _base_env(monkeypatch)
     monkeypatch.setenv('EMBEDDING_PROVIDER', 'openai')
+
+    with pytest.raises(ValidationError):
+        AppSettings(_env_file=None)
+
+
+def test_settings_reject_unsupported_synthesis_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv('LLM_SYNTHESIS_PROVIDER', 'openai')
+
+    with pytest.raises(ValidationError):
+        AppSettings(_env_file=None)
+
+
+def test_settings_require_shared_gemini_key_when_synthesis_key_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('LLM_SYNTHESIS_PROVIDER', 'gemini')
+    monkeypatch.delenv('LLM_SYNTHESIS_API_KEY', raising=False)
+    monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+    monkeypatch.delenv('GEMINI_API_KEY', raising=False)
+    monkeypatch.setenv('LLM_SYNTHESIS_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('LLM_SYNTHESIS_MODEL', 'gemini-2.5-flash')
+    monkeypatch.setenv('EMBEDDING_PROVIDER', 'gemini')
+    monkeypatch.setenv('EMBEDDING_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('EMBEDDING_MODEL', 'gemini-embedding-001')
 
     with pytest.raises(ValidationError):
         AppSettings(_env_file=None)
