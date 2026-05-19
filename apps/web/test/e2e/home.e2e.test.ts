@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 
-test('home page loads and exposes diagnostics entrypoint', async ({ page }) => {
+test('home page redirects to catalog on first load', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByText('ShopPilot Phase 0 Foundation')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open health check' })).toBeVisible();
+  await expect(page).toHaveURL(/\/catalog(?:\?.*)?$/);
+  await expect(page.getByRole('heading', { name: 'Filter & Sort' })).toBeVisible();
 });

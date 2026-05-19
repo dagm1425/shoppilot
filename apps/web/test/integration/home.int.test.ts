@@ -1,12 +1,21 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import HomePage from '../../app/(customer)/page';
 
+const redirectMock = jest.fn();
+
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => redirectMock(path),
+}));
+
 describe('HomePage', () => {
-  it('renders the foundation heading', () => {
+  beforeEach(() => {
+    redirectMock.mockReset();
+  });
+
+  it('redirects customer home to /catalog', () => {
     render(React.createElement(HomePage));
 
-    expect(screen.getByText('ShopPilot Phase 0 Foundation')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open health check' })).toBeInTheDocument();
+    expect(redirectMock).toHaveBeenCalledWith('/catalog');
   });
 });
