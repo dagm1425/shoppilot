@@ -78,9 +78,9 @@ def build_stream_event_sequence(
     run_id: str,
     message_id: str,
     thread_id: str,
-    assistant_message: str,
-) -> list[dict[str, str]]:
-    events: list[dict[str, str]] = [
+    chat_response: ChatResponse,
+) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = [
         {
             'type': 'RUN_STARTED',
             'threadId': thread_id,
@@ -93,7 +93,7 @@ def build_stream_event_sequence(
         },
     ]
 
-    text_chunks = _chunk_message_for_stream(assistant_message)
+    text_chunks = _chunk_message_for_stream(chat_response.assistant_message)
     for delta in text_chunks:
         events.append(
             {
@@ -108,6 +108,12 @@ def build_stream_event_sequence(
             {
                 'type': 'TEXT_MESSAGE_END',
                 'messageId': message_id,
+            },
+            {
+                'type': 'STATE_SNAPSHOT',
+                'state': {
+                    'chatResponse': chat_response.model_dump(by_alias=True, mode='json'),
+                },
             },
             {
                 'type': 'RUN_FINISHED',

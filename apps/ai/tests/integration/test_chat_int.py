@@ -246,11 +246,17 @@ def test_chat_stream_returns_ordered_ag_ui_text_events(
     assert event_names[0] == 'RUN_STARTED'
     assert event_names[1] == 'TEXT_MESSAGE_START'
     assert 'TEXT_MESSAGE_CONTENT' in event_names
-    assert event_names[-2] == 'TEXT_MESSAGE_END'
+    assert event_names[-3] == 'TEXT_MESSAGE_END'
     assert event_names[-1] == 'RUN_FINISHED'
+    assert 'STATE_SNAPSHOT' in event_names
+    assert event_names[event_names.index('STATE_SNAPSHOT') + 1] == 'RUN_FINISHED'
 
     for event_name, payload in events:
         assert payload['type'] == event_name
+
+    snapshot_payload = next(payload for event_name, payload in events if event_name == 'STATE_SNAPSHOT')
+    assert isinstance(snapshot_payload.get('state'), dict)
+    assert isinstance(snapshot_payload['state'].get('chatResponse'), dict)
 
 
 def test_chat_stream_emits_run_error_event_on_failure(

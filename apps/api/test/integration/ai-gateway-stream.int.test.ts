@@ -37,6 +37,7 @@ const DEFAULT_STREAM_FRAMES = [
   'event: TEXT_MESSAGE_START\ndata: {"type":"TEXT_MESSAGE_START","messageId":"msg-1","role":"assistant"}\n\n',
   'event: TEXT_MESSAGE_CONTENT\ndata: {"type":"TEXT_MESSAGE_CONTENT","messageId":"msg-1","delta":"hello"}\n\n',
   'event: TEXT_MESSAGE_END\ndata: {"type":"TEXT_MESSAGE_END","messageId":"msg-1"}\n\n',
+  'event: STATE_SNAPSHOT\ndata: {"type":"STATE_SNAPSHOT","state":{"chatResponse":{"requestId":"gateway-stream-request","sessionId":"stream-session-1","assistantMessage":"hello","recommendations":[],"recommendedProductIds":[],"followUpPrompts":[],"placeholder":false}}}\n\n',
   'event: RUN_FINISHED\ndata: {"type":"RUN_FINISHED","runId":"run-1","threadId":"user-1:s-1"}\n\n',
 ];
 

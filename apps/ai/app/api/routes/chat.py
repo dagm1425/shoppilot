@@ -92,7 +92,7 @@ async def post_chat_stream(
                 run_id=envelope.run_id,
                 message_id=envelope.message_id,
                 thread_id=envelope.thread_id,
-                assistant_message=envelope.chat_response.assistant_message,
+                chat_response=envelope.chat_response,
             )
 
             for event in events:

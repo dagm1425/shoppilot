@@ -10,9 +10,8 @@ Optional environment overrides:
   API_BASE_URL   Default: http://localhost:${API_PORT:-4000}
   API_PORT       Used only when API_BASE_URL is unset (default: 4000)
   SESSION_ID     Default: s1
-  USER_ID        Default: demo-user
   REQUEST_ID     Default: stream-<epoch-seconds>
-  AUTH_SCOPE     Optional auth scope string included in userContext
+  LOCALE         Optional locale included in userContext (example: en-US)
 
 Example:
   SESSION_ID=session-42 REQUEST_ID=req-42 ./scripts/ai-chat-stream.sh "recommend running shoes under 100"
@@ -23,9 +22,8 @@ fi
 api_base_url="${API_BASE_URL:-http://localhost:${API_PORT:-4000}}"
 api_base_url="${api_base_url%/}"
 session_id="${SESSION_ID:-s1}"
-user_id="${USER_ID:-demo-user}"
 request_id="${REQUEST_ID:-stream-$(date +%s)}"
-auth_scope="${AUTH_SCOPE:-customer}"
+locale="${LOCALE:-}"
 message="${1:-recommend running shoes under 100}"
 
 json_escape() {
@@ -34,11 +32,13 @@ json_escape() {
 
 message_json="$(json_escape "$message")"
 session_id_json="$(json_escape "$session_id")"
-user_id_json="$(json_escape "$user_id")"
-request_id_json="$(json_escape "$request_id")"
-auth_scope_json="$(json_escape "$auth_scope")"
 
-payload="{\"message\":${message_json},\"sessionId\":${session_id_json},\"requestId\":${request_id_json},\"userContext\":{\"userId\":${user_id_json},\"authScope\":${auth_scope_json}}}"
+if [[ -n "$locale" ]]; then
+  locale_json="$(json_escape "$locale")"
+  payload="{\"message\":${message_json},\"sessionId\":${session_id_json},\"userContext\":{\"locale\":${locale_json}}}"
+else
+  payload="{\"message\":${message_json},\"sessionId\":${session_id_json}}"
+fi
 
 echo "POST ${api_base_url}/ai/chat/stream"
 echo "requestId=${request_id} sessionId=${session_id}"

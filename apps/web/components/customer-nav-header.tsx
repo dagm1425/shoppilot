@@ -443,12 +443,6 @@ export function CustomerNavHeader() {
           >
             See all
           </Link>
-          <Link
-            href="/assistant"
-            className="inline-flex h-full items-center px-3 font-auth-heading text-xs font-bold uppercase tracking-wider text-foreground"
-          >
-            Assistant
-          </Link>
         </nav>
 
         <div className="ml-auto hidden items-center gap-2 md:flex">
@@ -652,12 +646,6 @@ export function CustomerNavHeader() {
               className="block rounded-lg border border-border bg-card px-4 py-3 font-auth-heading text-sm font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-muted"
             >
               See all
-            </Link>
-            <Link
-              href="/assistant"
-              className="block rounded-lg border border-border bg-card px-4 py-3 font-auth-heading text-sm font-semibold uppercase tracking-wide text-foreground transition-colors hover:bg-muted"
-            >
-              Assistant
             </Link>
           </nav>
         </div>

@@ -9,12 +9,16 @@ const base: Config = {
           module: 'CommonJS',
           moduleResolution: 'Node',
           jsx: 'react-jsx',
+          allowJs: true,
         },
       },
     ],
   },
   testEnvironment: 'jsdom',
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
+  transformIgnorePatterns: [
+    '/node_modules/(?!(?:@assistant-ui/react|@assistant-ui/core|@assistant-ui/store)/)',
+  ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
     '^(\\.{1,2}/.*)\\.js$': '$1',
