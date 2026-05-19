@@ -455,16 +455,14 @@ describe('Assistant modal integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open assistant' }));
 
-    expect(
-      await screen.findByRole('heading', { name: 'AI Shopping Assistant' }),
-    ).toBeInTheDocument();
+    expect(await screen.findByLabelText('Assistant message')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close assistant' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close assistant' }));
 
     await waitFor(() => {
-      expect(
-        screen.queryByRole('heading', { name: 'AI Shopping Assistant' }),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Assistant message')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open assistant' })).toBeInTheDocument();
     });
   });
 

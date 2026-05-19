@@ -130,7 +130,7 @@ async function openAssistantModal(page: Page) {
     const openTrigger = page.locator('button[aria-label="Open assistant"]');
     await expect(openTrigger).toBeVisible();
     await openTrigger.click({ force: true });
-    await expect(page.getByRole('heading', { name: 'AI Shopping Assistant' })).toBeVisible();
+    await expect(page.getByLabel('Assistant message')).toBeVisible();
   }).toPass({
     timeout: 15_000,
   });
@@ -142,6 +142,12 @@ test('assistant FAB modal opens on customer route and dispatches stream request'
   await installAssistantStreamCaptureMock(page);
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  await openAssistantModal(page);
+  await expect(page.getByRole('button', { name: 'Close assistant' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Close assistant' }).click();
+  await expect(page.getByLabel('Assistant message')).toHaveCount(0);
 
   await openAssistantModal(page);
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { BotIcon, XIcon } from 'lucide-react';
+import { BotIcon, ChevronDownIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AssistantModalPrimitive,
@@ -311,24 +311,6 @@ function AssistantModalContent() {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <div className="flex h-full flex-col bg-card">
-        <header className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-card-foreground">AI Shopping Assistant</h2>
-            <p className="text-xs text-muted-foreground">
-              Ask for recommendations, comparisons, and budget fits.
-            </p>
-          </div>
-          <AssistantModalPrimitive.Trigger asChild>
-            <button
-              type="button"
-              className="rounded-md border border-border bg-background p-1.5 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              aria-label="Close assistant"
-            >
-              <XIcon className="size-4" aria-hidden="true" />
-            </button>
-          </AssistantModalPrimitive.Trigger>
-        </header>
-
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 overflow-y-auto px-4 py-4">
             <div className="space-y-4">
@@ -460,16 +442,29 @@ function AssistantModalContent() {
 }
 
 export function AssistantWidget() {
+  const [isOpen, setIsOpen] = useState(false);
+
   return (
-    <AssistantModalPrimitive.Root>
+    <AssistantModalPrimitive.Root open={isOpen} onOpenChange={setIsOpen}>
       <AssistantModalPrimitive.Anchor className="fixed bottom-4 right-4 z-[70]">
         <AssistantModalPrimitive.Trigger asChild>
           <button
             type="button"
-            className="inline-flex size-12 items-center justify-center rounded-full border border-border bg-primary text-primary-foreground shadow-md transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            aria-label="Open assistant"
+            className="relative inline-flex size-12 items-center justify-center rounded-full border border-border bg-primary text-primary-foreground shadow-md transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label={isOpen ? 'Close assistant' : 'Open assistant'}
           >
-            <BotIcon className="size-5" aria-hidden="true" />
+            <BotIcon
+              className={`absolute size-5 transition-all ${
+                isOpen ? 'rotate-90 scale-0 opacity-0' : 'rotate-0 scale-100 opacity-100'
+              }`}
+              aria-hidden="true"
+            />
+            <ChevronDownIcon
+              className={`absolute size-5 transition-all ${
+                isOpen ? 'rotate-0 scale-100 opacity-100' : '-rotate-90 scale-0 opacity-0'
+              }`}
+              aria-hidden="true"
+            />
           </button>
         </AssistantModalPrimitive.Trigger>
       </AssistantModalPrimitive.Anchor>
