@@ -46,12 +46,11 @@ Add these env vars in `apps/ai/.env`:
 
 ```bash
 EMBEDDING_PROVIDER=gemini
-EMBEDDING_API_KEY=your-gemini-api-key
+GEMINI_API_KEY=your-gemini-api-key
 EMBEDDING_MODEL=gemini-embedding-001
 EMBEDDING_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 
 # optional Gemini alias fallbacks:
-# GEMINI_API_KEY=your-gemini-api-key
 # GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 # GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 ```

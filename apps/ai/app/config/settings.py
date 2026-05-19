@@ -18,9 +18,7 @@ class AppSettings(BaseSettings):
     openai_base_url: AnyHttpUrl = Field(validation_alias='OPENAI_BASE_URL')
     openai_chat_model: str = Field(min_length=1, validation_alias='OPENAI_CHAT_MODEL')
     embedding_provider: str = Field(default='gemini', min_length=1, validation_alias='EMBEDDING_PROVIDER')
-    embedding_api_key: SecretStr = Field(
-        validation_alias=AliasChoices('EMBEDDING_API_KEY', 'GEMINI_API_KEY'),
-    )
+    embedding_api_key: SecretStr = Field(validation_alias='GEMINI_API_KEY')
     embedding_base_url: AnyHttpUrl = Field(
         default='https://generativelanguage.googleapis.com/v1beta',
         validation_alias=AliasChoices('EMBEDDING_BASE_URL', 'GEMINI_BASE_URL'),

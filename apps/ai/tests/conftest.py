@@ -14,7 +14,7 @@ def _set_required_env() -> None:
     os.environ.setdefault('OPENAI_BASE_URL', 'https://api.openai.com/v1')
     os.environ.setdefault('OPENAI_CHAT_MODEL', 'gpt-4.1-mini')
     os.environ.setdefault('EMBEDDING_PROVIDER', 'gemini')
-    os.environ.setdefault('EMBEDDING_API_KEY', 'test-gemini-key')
+    os.environ.setdefault('GEMINI_API_KEY', 'test-gemini-key')
     os.environ.setdefault('EMBEDDING_MODEL', 'gemini-embedding-001')
     os.environ.setdefault('EMBEDDING_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
     os.environ.setdefault('LANGCHAIN_TRACING_V2', 'false')
