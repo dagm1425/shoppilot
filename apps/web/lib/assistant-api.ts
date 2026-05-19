@@ -282,9 +282,14 @@ export async function streamAssistantMessage(
   let latestSnapshot: AssistantApiChatResponse | null = null;
   let streamRunId: string | null = response.headers.get(RUN_ID_HEADER);
   let streamThreadId: string | null = null;
+  let terminalEventReached = false;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const parseChunk = createSseBlockParser((block) => {
+    if (terminalEventReached) {
+      return;
+    }
+
     const parsedBlock = parseSseBlock(block);
     if (!parsedBlock.data) {
       return;
@@ -344,12 +349,14 @@ export async function streamAssistantMessage(
     if (eventType === 'RUN_ERROR') {
       const parsed = runErrorEventSchema.safeParse(parsedData);
       if (!parsed.success) {
+        terminalEventReached = true;
         handlers.onError?.({
           message: 'Assistant stream failed unexpectedly.',
           code: 'AI_STREAM_RUN_ERROR',
         });
         return;
       }
+      terminalEventReached = true;
       handlers.onError?.({
         message: parsed.data.message,
         code: parsed.data.code ?? 'AI_INTERNAL_ERROR',
@@ -359,12 +366,14 @@ export async function streamAssistantMessage(
 
     if (eventType === 'RUN_FINISHED') {
       if (!latestSnapshot) {
+        terminalEventReached = true;
         handlers.onError?.({
           message: 'Assistant response finished without final state.',
           code: 'AI_STREAM_SNAPSHOT_MISSING',
         });
         return;
       }
+      terminalEventReached = true;
       handlers.onFinished?.(latestSnapshot);
     }
   });
@@ -382,10 +391,14 @@ export async function streamAssistantMessage(
       }
 
       parseChunk(decoder.decode(value, { stream: true }));
+
+      if (terminalEventReached) {
+        break;
+      }
     }
 
     const finalChunk = decoder.decode();
-    if (finalChunk.length > 0) {
+    if (!terminalEventReached && finalChunk.length > 0) {
       parseChunk(finalChunk);
     }
   } catch (error) {

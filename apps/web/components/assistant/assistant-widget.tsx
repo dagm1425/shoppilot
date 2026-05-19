@@ -159,6 +159,8 @@ function AssistantModalContent() {
   const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
+
     return () => {
       mountedRef.current = false;
       abortControllerRef.current?.abort();
@@ -231,7 +233,6 @@ function AssistantModalContent() {
             if (!mountedRef.current || abortController.signal.aborted) {
               return;
             }
-
             streamCompleted = true;
             setLatestPayload(snapshot);
             setMessages((previous) => [
