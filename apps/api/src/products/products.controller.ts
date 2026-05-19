@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import * as Sentry from '@sentry/nestjs';
 import { Role } from '@prisma/client';
+import type { AuthenticatedRequestUser } from '../auth/auth.types.js';
+import { CurrentUser } from '../auth/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
@@ -36,7 +38,11 @@ export class ProductsController {
   @Post('admin/media/presign')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  async createAdminMediaPresign(@Body() body: unknown, @Req() request: RequestWithContext) {
+  async createAdminMediaPresign(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Body() body: unknown,
+    @Req() request: RequestWithContext,
+  ) {
     const parsedBody = parseAdminMediaPresignBodyOrThrow(body);
 
     Sentry.setTag('product.operation', 'admin-media-presign');
@@ -47,14 +53,18 @@ export class ProductsController {
         name: 'admin.product.media.presign',
         op: 'http.server',
       },
-      async () => this.productsService.createAdminMediaPresign(parsedBody, request.requestId),
+      async () => this.productsService.createAdminMediaPresign(parsedBody, user.id, request.requestId),
     );
   }
 
   @Post('admin')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  async createProductAsAdmin(@Body() body: unknown, @Req() request: RequestWithContext) {
+  async createProductAsAdmin(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Body() body: unknown,
+    @Req() request: RequestWithContext,
+  ) {
     const parsedBody = parseAdminCreateProductBodyOrThrow(body);
 
     Sentry.setTag('product.operation', 'admin-create');
@@ -66,7 +76,7 @@ export class ProductsController {
         name: 'admin.product.create',
         op: 'http.server',
       },
-      async () => this.productsService.createProductAsAdmin(parsedBody, request.requestId),
+      async () => this.productsService.createProductAsAdmin(parsedBody, user.id, request.requestId),
     );
   }
 
@@ -74,6 +84,7 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   async updateProductAsAdmin(
+    @CurrentUser() user: AuthenticatedRequestUser,
     @Param('productId') productId: string,
     @Body() body: unknown,
     @Req() request: RequestWithContext,
@@ -88,7 +99,8 @@ export class ProductsController {
         name: 'admin.product.update',
         op: 'http.server',
       },
-      async () => this.productsService.updateProductAsAdmin(parsedProductId, parsedBody, request.requestId),
+      async () =>
+        this.productsService.updateProductAsAdmin(parsedProductId, parsedBody, user.id, request.requestId),
     );
   }
 

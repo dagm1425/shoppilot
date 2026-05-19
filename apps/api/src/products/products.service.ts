@@ -273,13 +273,15 @@ export class ProductsService {
 
   async createAdminMediaPresign(
     input: AdminMediaPresignInput,
+    actorId: string,
     requestId?: string,
   ): Promise<AdminMediaPresignResponse> {
-    return this.mediaStorage.createPresignedUpload(input, requestId);
+    return this.mediaStorage.createPresignedUpload(input, actorId, requestId);
   }
 
   async createProductAsAdmin(
     input: AdminCreateProductInput,
+    actorId: string,
     requestId?: string,
   ): Promise<AdminProductMutationResponse> {
     const slug = input.slug ?? slugifyFromName(input.name);
@@ -348,6 +350,7 @@ export class ProductsService {
 
     this.logger.log({
       event: 'admin.product.create',
+      actorId,
       requestId: requestId ?? 'unknown-request-id',
       productId: product.id,
       productSlug: product.slug,
@@ -360,6 +363,7 @@ export class ProductsService {
   async updateProductAsAdmin(
     productId: string,
     input: AdminUpdateProductInput,
+    actorId: string,
     requestId?: string,
   ): Promise<AdminProductMutationResponse> {
     const existing = await this.prisma.product.findUnique({
@@ -480,6 +484,7 @@ export class ProductsService {
 
     this.logger.log({
       event: 'admin.product.update',
+      actorId,
       requestId: requestId ?? 'unknown-request-id',
       productId: product.id,
       productSlug: product.slug,

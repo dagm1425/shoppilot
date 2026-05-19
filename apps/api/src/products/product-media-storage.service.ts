@@ -41,6 +41,7 @@ export class ProductMediaStorageService {
 
   async createPresignedUpload(
     input: AdminMediaPresignInput,
+    actorId: string,
     requestId?: string,
   ): Promise<PresignedUploadTarget> {
     if (!this.s3Client || !this.env.PRODUCT_MEDIA_S3_BUCKET || !this.env.PRODUCT_MEDIA_S3_REGION) {
@@ -100,6 +101,7 @@ export class ProductMediaStorageService {
 
     this.logger.log({
       event: 'admin.product.media.presign',
+      actorId,
       requestId: requestId ?? 'unknown-request-id',
       role: input.role,
       contentType: input.contentType,
