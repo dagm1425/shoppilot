@@ -32,21 +32,34 @@ This command reads product rows from PostgreSQL, builds embeddings, and refreshe
 
 ## Use Gemini for embeddings
 
-The embedding pipeline uses an OpenAI-compatible client. Gemini supports the same flow through its OpenAI compatibility endpoint.
+Phase A uses the official Google GenAI SDK (`google-genai`) for embeddings.
+
+Install/update dependencies:
+
+```bash
+cd apps/ai
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
 Add these env vars in `apps/ai/.env`:
 
 ```bash
-USE_GEMINI_EMBEDDINGS=true
-GEMINI_API_KEY=your-gemini-api-key
-# optional overrides:
-# GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+EMBEDDING_PROVIDER=gemini
+EMBEDDING_API_KEY=your-gemini-api-key
+EMBEDDING_MODEL=gemini-embedding-001
+EMBEDDING_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+
+# optional Gemini alias fallbacks:
+# GEMINI_API_KEY=your-gemini-api-key
+# GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 # GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 ```
 
-With `USE_GEMINI_EMBEDDINGS=true`, the service defaults embedding calls to:
-- base URL: `https://generativelanguage.googleapis.com/v1beta/openai/`
+Embedding defaults:
+- provider: `gemini`
 - model: `gemini-embedding-001`
+- base URL: `https://generativelanguage.googleapis.com/v1beta`
 
 ## Phase 4.3 synthesis note
 
@@ -56,3 +69,4 @@ an LLM synthesis step only at final response generation:
 - retrieval and product ranking remain tool-driven
 - synthesis rewrites user-facing `assistantMessage` and `followUpPrompts`
 - synthesis failure falls back to deterministic graph messaging
+- synthesis provider migration is intentionally deferred to a separate Phase B change

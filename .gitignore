@@ -8,6 +8,12 @@ test-results
 .env
 .env.*
 !.env.example
+!apps/ai/.env.sample
 *.log
 .DS_Store
 *.tsbuildinfo
+__pycache__/
+*.pyc
+.venv/
+apps/ai/.chroma/
+.chroma/

@@ -12,9 +12,10 @@ from app.search.models import ProductRecord
 def _settings_stub(*, batch_size: int = 2) -> SimpleNamespace:
     return SimpleNamespace(
         database_url='postgresql://postgres:postgres@localhost:5432/shoppilot',
-        openai_api_key=SimpleNamespace(get_secret_value=lambda: 'test-key'),
-        openai_base_url='https://api.openai.com/v1',
-        openai_embedding_model='text-embedding-3-small',
+        embedding_provider='gemini',
+        embedding_api_key=SimpleNamespace(get_secret_value=lambda: 'test-key'),
+        embedding_base_url='https://generativelanguage.googleapis.com/v1beta',
+        embedding_model='gemini-embedding-001',
         chroma_persist_directory='.chroma-tests',
         chroma_collection_name='test-products',
         ai_index_version='test-v1',
@@ -86,10 +87,11 @@ def test_rebuild_product_index_batches_upserts_and_returns_count(monkeypatch: py
             return source_products
 
     class _Embeddings:
-        def __init__(self, *, api_key: str, base_url: str, model: str) -> None:
+        def __init__(self, *, provider: str, api_key: str, base_url: str, model: str) -> None:
+            assert provider == settings.embedding_provider
             assert api_key == 'test-key'
-            assert base_url == settings.openai_base_url
-            assert model == settings.openai_embedding_model
+            assert base_url == settings.embedding_base_url
+            assert model == settings.embedding_model
 
         def embed_texts(self, documents: list[str]) -> list[list[float]]:
             return [[0.1, 0.2, 0.3] for _ in documents]
@@ -134,10 +136,11 @@ def test_rebuild_product_index_raises_when_source_products_are_missing(
             return []
 
     class _Embeddings:
-        def __init__(self, *, api_key: str, base_url: str, model: str) -> None:
+        def __init__(self, *, provider: str, api_key: str, base_url: str, model: str) -> None:
+            assert provider == settings.embedding_provider
             assert api_key == 'test-key'
-            assert base_url == settings.openai_base_url
-            assert model == settings.openai_embedding_model
+            assert base_url == settings.embedding_base_url
+            assert model == settings.embedding_model
 
     class _VectorStore:
         def __init__(self, *, persist_directory: str, collection_name: str, index_version: str) -> None:
@@ -148,7 +151,7 @@ def test_rebuild_product_index_raises_when_source_products_are_missing(
     monkeypatch.setattr('app.search.indexer.ProductRepository', _Repo)
     monkeypatch.setattr('app.search.indexer.EmbeddingClient', _Embeddings)
     monkeypatch.setattr('app.search.indexer.ProductVectorStore', _VectorStore)
-    monkeypatch.setattr('app.search.indexer.capture_exception_if_configured', captured.append)
+    monkeypatch.setattr('app.search.indexer.capture_sentry_exception', captured.append)
 
     with pytest.raises(RuntimeError, match='No products found in PostgreSQL'):
         rebuild_product_index(settings)

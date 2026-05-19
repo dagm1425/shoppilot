@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
+from pydantic import AliasChoices, AnyHttpUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,7 +17,19 @@ class AppSettings(BaseSettings):
     openai_api_key: SecretStr = Field(validation_alias='OPENAI_API_KEY')
     openai_base_url: AnyHttpUrl = Field(validation_alias='OPENAI_BASE_URL')
     openai_chat_model: str = Field(min_length=1, validation_alias='OPENAI_CHAT_MODEL')
-    openai_embedding_model: str = Field(min_length=1, validation_alias='OPENAI_EMBEDDING_MODEL')
+    embedding_provider: str = Field(default='gemini', min_length=1, validation_alias='EMBEDDING_PROVIDER')
+    embedding_api_key: SecretStr = Field(
+        validation_alias=AliasChoices('EMBEDDING_API_KEY', 'GEMINI_API_KEY'),
+    )
+    embedding_base_url: AnyHttpUrl = Field(
+        default='https://generativelanguage.googleapis.com/v1beta',
+        validation_alias=AliasChoices('EMBEDDING_BASE_URL', 'GEMINI_BASE_URL'),
+    )
+    embedding_model: str = Field(
+        default='gemini-embedding-001',
+        min_length=1,
+        validation_alias=AliasChoices('EMBEDDING_MODEL', 'GEMINI_EMBEDDING_MODEL'),
+    )
     database_url: str = Field(
         default='postgresql://postgres:postgres@localhost:5432/shoppilot',
         validation_alias='DATABASE_URL',
@@ -115,6 +127,15 @@ class AppSettings(BaseSettings):
         if self.sentry_dsn is None or self.sentry_dsn.strip() == '':
             raise ValueError('SENTRY_DSN is required when SENTRY_ENABLED=true.')
 
+        return self
+
+    @model_validator(mode='after')
+    def validate_embedding_provider(self) -> 'AppSettings':
+        provider = self.embedding_provider.strip().lower()
+        if provider != 'gemini':
+            raise ValueError('EMBEDDING_PROVIDER must be "gemini" in Phase A.')
+
+        self.embedding_provider = provider
         return self
 
 

@@ -148,9 +148,10 @@ class SemanticSearchService:
     def _get_embedding_client(self) -> EmbeddingClient:
         if self._embedding_client is None:
             self._embedding_client = EmbeddingClient(
-                api_key=self._settings.openai_api_key.get_secret_value(),
-                base_url=str(self._settings.openai_base_url),
-                model=self._settings.openai_embedding_model,
+                provider=self._settings.embedding_provider,
+                api_key=self._settings.embedding_api_key.get_secret_value(),
+                base_url=str(self._settings.embedding_base_url),
+                model=self._settings.embedding_model,
             )
 
         return self._embedding_client

@@ -50,7 +50,9 @@ def create_app() -> FastAPI:
         extra={
             'openai_base_url': str(settings.openai_base_url),
             'openai_chat_model': settings.openai_chat_model,
-            'openai_embedding_model': settings.openai_embedding_model,
+            'embedding_provider': settings.embedding_provider,
+            'embedding_model': settings.embedding_model,
+            'embedding_base_url': str(settings.embedding_base_url),
             'langchain_tracing_v2': settings.langchain_tracing_v2,
             'sentry_enabled': settings.sentry_enabled,
             'chroma_collection_name': settings.chroma_collection_name,

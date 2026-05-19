@@ -10,7 +10,10 @@ def _base_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('OPENAI_API_KEY', 'test-openai-key')
     monkeypatch.setenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
     monkeypatch.setenv('OPENAI_CHAT_MODEL', 'gpt-4.1-mini')
-    monkeypatch.setenv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small')
+    monkeypatch.setenv('EMBEDDING_PROVIDER', 'gemini')
+    monkeypatch.setenv('EMBEDDING_API_KEY', 'test-gemini-key')
+    monkeypatch.setenv('EMBEDDING_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('EMBEDDING_MODEL', 'gemini-embedding-001')
 
 
 def test_settings_allow_langsmith_disabled_without_optional_keys(
@@ -88,6 +91,43 @@ def test_settings_reject_invalid_llm_synthesis_ranges(
 ) -> None:
     _base_env(monkeypatch)
     monkeypatch.setenv(field, value)
+
+    with pytest.raises(ValidationError):
+        AppSettings(_env_file=None)
+
+
+def test_settings_apply_embedding_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.embedding_provider == 'gemini'
+    assert settings.embedding_api_key.get_secret_value() == 'test-gemini-key'
+    assert str(settings.embedding_base_url) == 'https://generativelanguage.googleapis.com/v1beta'
+    assert settings.embedding_model == 'gemini-embedding-001'
+
+
+def test_settings_support_gemini_alias_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-openai-key')
+    monkeypatch.setenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+    monkeypatch.setenv('OPENAI_CHAT_MODEL', 'gpt-4.1-mini')
+    monkeypatch.delenv('EMBEDDING_API_KEY', raising=False)
+    monkeypatch.delenv('EMBEDDING_BASE_URL', raising=False)
+    monkeypatch.delenv('EMBEDDING_MODEL', raising=False)
+    monkeypatch.setenv('GEMINI_API_KEY', 'gemini-alias-key')
+    monkeypatch.setenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+    monkeypatch.setenv('GEMINI_EMBEDDING_MODEL', 'gemini-embedding-001')
+
+    settings = AppSettings(_env_file=None)
+
+    assert settings.embedding_api_key.get_secret_value() == 'gemini-alias-key'
+    assert str(settings.embedding_base_url) == 'https://generativelanguage.googleapis.com/v1beta'
+    assert settings.embedding_model == 'gemini-embedding-001'
+
+
+def test_settings_reject_unsupported_embedding_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    _base_env(monkeypatch)
+    monkeypatch.setenv('EMBEDDING_PROVIDER', 'openai')
 
     with pytest.raises(ValidationError):
         AppSettings(_env_file=None)

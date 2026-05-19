@@ -18,9 +18,10 @@ def rebuild_product_index(settings: AppSettings) -> int:
 
     repository = ProductRepository(database_url=settings.database_url)
     embedding_client = EmbeddingClient(
-        api_key=settings.openai_api_key.get_secret_value(),
-        base_url=str(settings.openai_base_url),
-        model=settings.openai_embedding_model,
+        provider=settings.embedding_provider,
+        api_key=settings.embedding_api_key.get_secret_value(),
+        base_url=str(settings.embedding_base_url),
+        model=settings.embedding_model,
     )
     vector_store = ProductVectorStore(
         persist_directory=settings.chroma_persist_directory,
@@ -50,7 +51,8 @@ def rebuild_product_index(settings: AppSettings) -> int:
                 'event': 'ai.index_rebuild_completed',
                 'indexed_count': indexed_count,
                 'duration_ms': duration_ms,
-                'embedding_model': settings.openai_embedding_model,
+                'embedding_provider': settings.embedding_provider,
+                'embedding_model': settings.embedding_model,
                 'index_version': settings.ai_index_version,
                 'collection_name': settings.chroma_collection_name,
             },
