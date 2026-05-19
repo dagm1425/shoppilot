@@ -423,7 +423,7 @@ function AssistantModalContent() {
                 rows={2}
                 aria-label="Assistant message"
                 placeholder="Ask for recommendations..."
-                className="min-h-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="min-h-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-black focus:outline-none focus:ring-1 focus:ring-black focus:ring-offset-0"
               />
               <ComposerPrimitive.Send asChild>
                 <button
@@ -450,7 +450,7 @@ export function AssistantWidget() {
         <AssistantModalPrimitive.Trigger asChild>
           <button
             type="button"
-            className="relative inline-flex size-12 items-center justify-center rounded-full border border-border bg-primary text-primary-foreground shadow-md transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="relative inline-flex size-12 items-center justify-center rounded-full border border-border bg-black text-white shadow-md transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             aria-label={isOpen ? 'Close assistant' : 'Open assistant'}
           >
             <BotIcon
