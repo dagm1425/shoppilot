@@ -129,6 +129,24 @@ export class ApiErrorFilter implements ExceptionFilter {
         return 'AUTH_UNAUTHORIZED';
       }
 
+      if (path.startsWith('/ai')) {
+        if (status === HttpStatus.TOO_MANY_REQUESTS) {
+          return 'AI_RATE_LIMITED';
+        }
+
+        if (status === HttpStatus.GATEWAY_TIMEOUT) {
+          return 'AI_UPSTREAM_TIMEOUT';
+        }
+
+        if (status === HttpStatus.BAD_GATEWAY) {
+          return 'AI_UPSTREAM_UNAVAILABLE';
+        }
+
+        if (status === HttpStatus.BAD_REQUEST) {
+          return 'AI_VALIDATION_ERROR';
+        }
+      }
+
       return `HTTP_${status}`;
     }
 
@@ -170,6 +188,10 @@ export class ApiErrorFilter implements ExceptionFilter {
 
     if (path.startsWith('/webhooks')) {
       return 'phase-2.4';
+    }
+
+    if (path.startsWith('/ai')) {
+      return 'phase-4.4';
     }
 
     return 'phase-0';

@@ -1,6 +1,10 @@
 process.env.NODE_ENV = 'test';
 process.env.API_PORT = process.env.API_PORT ?? '4000';
 process.env.WEB_ORIGIN = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+process.env.AI_SERVICE_BASE_URL = process.env.AI_SERVICE_BASE_URL ?? 'http://127.0.0.1:8000';
+process.env.AI_GATEWAY_TIMEOUT_MS = process.env.AI_GATEWAY_TIMEOUT_MS ?? '300';
+process.env.AI_RATE_LIMIT_TTL_SEC = process.env.AI_RATE_LIMIT_TTL_SEC ?? '60';
+process.env.AI_RATE_LIMIT_MAX = process.env.AI_RATE_LIMIT_MAX ?? '4';
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/shoppilot';
 process.env.SENTRY_ENABLED = process.env.SENTRY_ENABLED ?? 'false';

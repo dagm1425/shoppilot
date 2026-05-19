@@ -9,6 +9,7 @@ import { AddressModule } from './address/address.module.js';
 import { CheckoutModule } from './checkout/checkout.module.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { WebhooksModule } from './webhooks/webhooks.module.js';
+import { AiModule } from './ai/ai.module.js';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     CheckoutModule,
     OrdersModule,
     WebhooksModule,
+    AiModule,
   ],
 })
 export class AppModule {}
