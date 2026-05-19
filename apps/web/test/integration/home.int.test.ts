@@ -1,5 +1,3 @@
-import React from 'react';
-import { render } from '@testing-library/react';
 import HomePage from '../../app/(customer)/page';
 
 const redirectMock = jest.fn();
@@ -14,7 +12,7 @@ describe('HomePage', () => {
   });
 
   it('redirects customer home to /catalog', () => {
-    render(React.createElement(HomePage));
+    HomePage();
 
     expect(redirectMock).toHaveBeenCalledWith('/catalog');
   });

@@ -20,6 +20,7 @@ import {
   type AssistantApiChatResponse,
   type AssistantApiProduct,
 } from '../../lib/assistant-api';
+import { useAuthStore } from '../../lib/auth-store';
 import { StatePanel } from '../state-panel';
 
 const ASSISTANT_SESSION_STORAGE_KEY = 'shoppilot.assistant.session-id';
@@ -60,6 +61,22 @@ function readOrCreateSessionId(): string {
   } catch {
     return fallback;
   }
+}
+
+function rotateStoredSessionId(): string {
+  const nextSessionId = createId('assistant-session');
+
+  if (typeof window === 'undefined') {
+    return nextSessionId;
+  }
+
+  try {
+    window.localStorage.setItem(ASSISTANT_SESSION_STORAGE_KEY, nextSessionId);
+  } catch {
+    // Ignore storage write errors; widget can still continue with in-memory session.
+  }
+
+  return nextSessionId;
 }
 
 function formatPrice(cents: number, currency: string): string {
@@ -148,7 +165,11 @@ const AssistantThreadMessage = () => {
   );
 };
 
-function AssistantModalContent() {
+type AssistantModalContentProps = {
+  resetToken: number;
+};
+
+function AssistantModalContent({ resetToken }: AssistantModalContentProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState(() => readOrCreateSessionId());
   const [requestState, setRequestState] = useState<RequestState>('idle');
@@ -166,6 +187,25 @@ function AssistantModalContent() {
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  const resetChatState = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setSessionId(readOrCreateSessionId());
+    setMessages([]);
+    setRequestState('idle');
+    setErrorMessage('');
+    setLastPrompt('');
+    setLatestPayload(null);
+  }, []);
+
+  useEffect(() => {
+    if (resetToken === 0) {
+      return;
+    }
+
+    resetChatState();
+  }, [resetChatState, resetToken]);
 
   const recommendedProducts = useMemo(
     () => buildRecommendedProducts(latestPayload),
@@ -444,9 +484,32 @@ function AssistantModalContent() {
 
 export function AssistantWidget() {
   const [isOpen, setIsOpen] = useState(false);
+  const [resetToken, setResetToken] = useState(0);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const previousUserIdRef = useRef<string | null>(userId);
+
+  useEffect(() => {
+    const previousUserId = previousUserIdRef.current;
+    if (previousUserId === userId) {
+      return;
+    }
+
+    previousUserIdRef.current = userId;
+    rotateStoredSessionId();
+    setResetToken((previous) => previous + 1);
+    setIsOpen(false);
+  }, [userId]);
+
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      rotateStoredSessionId();
+      setResetToken((previous) => previous + 1);
+    }
+    setIsOpen(nextOpen);
+  }, []);
 
   return (
-    <AssistantModalPrimitive.Root open={isOpen} onOpenChange={setIsOpen}>
+    <AssistantModalPrimitive.Root open={isOpen} onOpenChange={handleOpenChange}>
       <AssistantModalPrimitive.Anchor className="fixed bottom-4 right-4 z-[70]">
         <AssistantModalPrimitive.Trigger asChild>
           <button
@@ -473,7 +536,7 @@ export function AssistantWidget() {
         sideOffset={12}
         className="z-[70] h-[min(82vh,42rem)] w-[min(94vw,28rem)] overflow-hidden rounded-lg border border-border bg-card shadow-md outline-none"
       >
-        <AssistantModalContent />
+        <AssistantModalContent resetToken={resetToken} />
       </AssistantModalPrimitive.Content>
     </AssistantModalPrimitive.Root>
   );

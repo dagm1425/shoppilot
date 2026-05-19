@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TextDecoder, TextEncoder } from 'node:util';
 
 process.env.NEXT_PUBLIC_API_BASE_URL = 'http://127.0.0.1:4000';
@@ -307,6 +307,7 @@ jest.mock('@assistant-ui/react', () => {
 
 import CustomerLayout from '../../app/(customer)/layout';
 import { AssistantWidget } from '../../components/assistant/assistant-widget';
+import { useAuthStore } from '../../lib/auth-store';
 
 type AssistantSnapshotInput = {
   requestId?: string;
@@ -435,6 +436,10 @@ describe('Assistant modal integration', () => {
       writable: true,
     });
     window.localStorage.clear();
+    act(() => {
+      useAuthStore.getState().clearUser();
+      useAuthStore.getState().setSessionChecked(false);
+    });
   });
 
   afterEach(() => {
@@ -561,5 +566,177 @@ describe('Assistant modal integration', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('rotates session id on close and starts a clean chat on reopen', async () => {
+    const firstSnapshot = buildSnapshot({
+      assistantMessage: 'First chat response.',
+    });
+    const secondSnapshot = buildSnapshot({
+      requestId: 'request-2',
+      assistantMessage: 'Second chat response.',
+    });
+
+    fetchMock
+      .mockResolvedValueOnce(buildSseResponse(buildFrames(firstSnapshot)))
+      .mockResolvedValueOnce(buildSseResponse(buildFrames(secondSnapshot)));
+
+    render(React.createElement(AssistantWidget));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open assistant' }));
+    fireEvent.change(screen.getByLabelText('Assistant message'), {
+      target: { value: 'First prompt' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('First chat response.')).toBeInTheDocument();
+
+    const firstRequest = fetchMock.mock.calls[0];
+    const firstBody = JSON.parse(
+      String((firstRequest?.[1] as RequestInit | undefined)?.body ?? '{}'),
+    ) as { sessionId?: string };
+    expect(firstBody.sessionId).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close assistant' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open assistant' }));
+
+    expect(screen.queryByText('First chat response.')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Assistant message'), {
+      target: { value: 'Second prompt' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('Second chat response.')).toBeInTheDocument();
+
+    const secondRequest = fetchMock.mock.calls[1];
+    const secondBody = JSON.parse(
+      String((secondRequest?.[1] as RequestInit | undefined)?.body ?? '{}'),
+    ) as { sessionId?: string };
+    expect(secondBody.sessionId).toBeTruthy();
+    expect(secondBody.sessionId).not.toBe(firstBody.sessionId);
+  });
+
+  it('aborts in-flight request and rotates session when auth user switches', async () => {
+    let aborted = false;
+
+    act(() => {
+      useAuthStore.getState().setUser({
+        id: 'user-1',
+        username: 'user1',
+        email: 'user1@example.com',
+        role: 'CUSTOMER',
+      });
+    });
+
+    fetchMock.mockImplementationOnce(async (_input, init) => {
+      const signal = (init as RequestInit | undefined)?.signal as AbortSignal | undefined;
+
+      return await new Promise<Response>((resolve) => {
+        if (!signal) {
+          resolve(
+            buildJsonResponse(
+              {
+                error: {
+                  code: 'AI_STREAM_SIGNAL_MISSING',
+                  message: 'Missing request signal.',
+                },
+              },
+              500,
+            ),
+          );
+          return;
+        }
+
+        if (signal.aborted) {
+          aborted = true;
+          resolve(
+            buildJsonResponse(
+              {
+                error: {
+                  code: 'AI_ABORTED',
+                  message: 'Aborted',
+                },
+              },
+              499,
+            ),
+          );
+          return;
+        }
+
+        signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            resolve(
+              buildJsonResponse(
+                {
+                  error: {
+                    code: 'AI_ABORTED',
+                    message: 'Aborted',
+                  },
+                },
+                499,
+              ),
+            );
+          },
+          { once: true },
+        );
+      });
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      buildSseResponse(
+        buildFrames(
+          buildSnapshot({
+            requestId: 'request-after-switch',
+            assistantMessage: 'Fresh response after user switch.',
+          }),
+        ),
+      ),
+    );
+
+    render(React.createElement(AssistantWidget));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open assistant' }));
+    fireEvent.change(screen.getByLabelText('Assistant message'), {
+      target: { value: 'Prompt before switch' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    const firstRequest = fetchMock.mock.calls[0];
+    const firstBody = JSON.parse(
+      String((firstRequest?.[1] as RequestInit | undefined)?.body ?? '{}'),
+    ) as { sessionId?: string };
+    expect(firstBody.sessionId).toBeTruthy();
+
+    act(() => {
+      useAuthStore.getState().setUser({
+        id: 'user-2',
+        username: 'user2',
+        email: 'user2@example.com',
+        role: 'CUSTOMER',
+      });
+    });
+
+    await waitFor(() => {
+      expect(aborted).toBe(true);
+      expect(screen.getByRole('button', { name: 'Open assistant' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open assistant' }));
+    fireEvent.change(screen.getByLabelText('Assistant message'), {
+      target: { value: 'Prompt after switch' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('Fresh response after user switch.')).toBeInTheDocument();
+
+    const secondRequest = fetchMock.mock.calls[1];
+    const secondBody = JSON.parse(
+      String((secondRequest?.[1] as RequestInit | undefined)?.body ?? '{}'),
+    ) as { sessionId?: string };
+    expect(secondBody.sessionId).toBeTruthy();
+    expect(secondBody.sessionId).not.toBe(firstBody.sessionId);
   });
 });
