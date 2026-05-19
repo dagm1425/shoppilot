@@ -4,6 +4,10 @@ import type { AdminOrdersListQuery, AdminOrdersListResponse } from '@shoppilot/d
 import type { OrderRecord } from '@shoppilot/db/order-contract';
 import { OrderStatus as PrismaOrderStatus, type Prisma } from '@prisma/client';
 import type { AuthenticatedRequestUser } from '../auth/auth.types.js';
+import {
+  OrderConfirmationEmailQueueService,
+  type OrderConfirmationQueueHealthSnapshot,
+} from '../checkout/order-confirmation-email.queue.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   mapOrderRecord,
@@ -77,7 +81,11 @@ function buildRevenueTrend(
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(OrderConfirmationEmailQueueService)
+    private readonly orderConfirmationEmailQueueService: OrderConfirmationEmailQueueService,
+  ) {}
 
   async getOrderByNumber(
     user: AuthenticatedRequestUser,
@@ -116,7 +124,7 @@ export class OrdersService {
     return response;
   }
 
-  async getAdminHomeSummary(requestId?: string): Promise<AdminHomeSummaryResponse> {
+  async getAdminHomeSummary(actorId: string, requestId?: string): Promise<AdminHomeSummaryResponse> {
     const now = new Date();
     const todayStart = startOfDay(now);
     const tomorrowStart = addDays(todayStart, 1);
@@ -218,6 +226,7 @@ export class OrdersService {
 
     this.logger.log({
       event: 'admin.home.summary.read',
+      actorId,
       requestId: requestId ?? 'unknown-request-id',
       ordersToday,
       paidOrdersToday,
@@ -232,6 +241,7 @@ export class OrdersService {
 
   async getAdminOrdersList(
     query: AdminOrdersListQuery,
+    actorId: string,
     requestId?: string,
   ): Promise<AdminOrdersListResponse> {
     const createdAtFilter: Prisma.DateTimeFilter | undefined =
@@ -327,6 +337,7 @@ export class OrdersService {
 
     this.logger.log({
       event: 'admin.orders.list.read',
+      actorId,
       requestId: requestId ?? 'unknown-request-id',
       page: response.pagination.page,
       pageSize: response.pagination.pageSize,
@@ -339,5 +350,26 @@ export class OrdersService {
     });
 
     return response;
+  }
+
+  async getAdminQueueHealth(
+    actorId: string,
+    requestId?: string,
+  ): Promise<OrderConfirmationQueueHealthSnapshot> {
+    const snapshot = await this.orderConfirmationEmailQueueService.getQueueHealthSnapshot();
+
+    this.logger.log({
+      event: 'admin.queue.health.read',
+      actorId,
+      requestId: requestId ?? 'unknown-request-id',
+      queueName: snapshot.queueName,
+      waiting: snapshot.counts.waiting,
+      active: snapshot.counts.active,
+      completed: snapshot.counts.completed,
+      failed: snapshot.counts.failed,
+      outcome: 'success',
+    });
+
+    return snapshot;
   }
 }

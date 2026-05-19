@@ -18,7 +18,10 @@ export class OrdersController {
   @Get('admin/home')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
-  async getAdminHomeSummary(@Req() request: RequestWithContext) {
+  async getAdminHomeSummary(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Req() request: RequestWithContext,
+  ) {
     Sentry.setTag('order.operation', 'admin-home-summary');
 
     return Sentry.startSpan(
@@ -26,14 +29,18 @@ export class OrdersController {
         name: 'admin.home.summary',
         op: 'http.server',
       },
-      async () => this.ordersService.getAdminHomeSummary(request.requestId),
+      async () => this.ordersService.getAdminHomeSummary(user.id, request.requestId),
     );
   }
 
   @Get('admin/list')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
-  async getAdminOrdersList(@Query() query: unknown, @Req() request: RequestWithContext) {
+  async getAdminOrdersList(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Query() query: unknown,
+    @Req() request: RequestWithContext,
+  ) {
     const parsedQuery = parseAdminOrdersListQueryOrThrow(query);
     Sentry.setTag('order.operation', 'admin-orders-list');
     Sentry.setTag('order.list.status', parsedQuery.status ?? 'all');
@@ -49,7 +56,25 @@ export class OrdersController {
         name: 'admin.orders.list',
         op: 'http.server',
       },
-      async () => this.ordersService.getAdminOrdersList(parsedQuery, request.requestId),
+      async () => this.ordersService.getAdminOrdersList(parsedQuery, user.id, request.requestId),
+    );
+  }
+
+  @Get('admin/queue-health')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  async getAdminQueueHealth(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Req() request: RequestWithContext,
+  ) {
+    Sentry.setTag('order.operation', 'admin-queue-health');
+
+    return Sentry.startSpan(
+      {
+        name: 'admin.queue.health',
+        op: 'http.server',
+      },
+      async () => this.ordersService.getAdminQueueHealth(user.id, request.requestId),
     );
   }
 

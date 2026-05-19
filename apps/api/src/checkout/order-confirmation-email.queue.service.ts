@@ -11,6 +11,17 @@ import {
   type OrderConfirmationEmailJobPayload,
 } from './order-confirmation-email.job.js';
 
+export type OrderConfirmationQueueHealthSnapshot = {
+  queueName: string;
+  generatedAt: string;
+  counts: {
+    waiting: number;
+    active: number;
+    completed: number;
+    failed: number;
+  };
+};
+
 @Injectable()
 export class OrderConfirmationEmailQueueService {
   private readonly logger = new Logger(OrderConfirmationEmailQueueService.name);
@@ -100,6 +111,26 @@ export class OrderConfirmationEmailQueueService {
         phase: 'enqueue',
       });
     }
+  }
+
+  async getQueueHealthSnapshot(): Promise<OrderConfirmationQueueHealthSnapshot> {
+    const [waiting, active, completed, failed] = await Promise.all([
+      this.orderConfirmationQueue.getWaitingCount(),
+      this.orderConfirmationQueue.getActiveCount(),
+      this.orderConfirmationQueue.getCompletedCount(),
+      this.orderConfirmationQueue.getFailedCount(),
+    ]);
+
+    return {
+      queueName: ORDER_CONFIRMATION_EMAIL_QUEUE,
+      generatedAt: new Date().toISOString(),
+      counts: {
+        waiting,
+        active,
+        completed,
+        failed,
+      },
+    };
   }
 
   private captureException(

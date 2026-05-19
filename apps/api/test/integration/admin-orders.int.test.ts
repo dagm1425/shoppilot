@@ -58,6 +58,17 @@ type OrderCountArgs = {
   where?: OrderFindManyArgs['where'];
 };
 
+const queueHealthSnapshot = {
+  queueName: 'order-confirmation-email',
+  generatedAt: '2026-05-18T10:00:00.000Z',
+  counts: {
+    waiting: 3,
+    active: 1,
+    completed: 42,
+    failed: 2,
+  },
+};
+
 class InMemoryAdminOrdersPrisma {
   private users = new Map<string, MockUser>();
   private usersByEmail = new Map<string, string>();
@@ -347,6 +358,9 @@ describe('Admin orders list (integration)', () => {
 
     app = await createTestApp({
       prismaService: prismaMock as never,
+      orderConfirmationEmailQueueService: {
+        getQueueHealthSnapshot: async () => queueHealthSnapshot,
+      },
     });
 
     jwtService = app.get(JwtService);
@@ -487,5 +501,37 @@ describe('Admin orders list (integration)', () => {
       };
     };
     expect(payload.error.code).toBe('ORDER_VALIDATION_ERROR');
+  });
+
+  it('blocks customer role from admin queue health endpoint', async () => {
+    const cookie = await getAuthCookie('customer@shoppilot.local');
+
+    const response = await fetch(`${baseUrl}/orders/admin/queue-health`, {
+      headers: {
+        cookie,
+      },
+    });
+
+    expect(response.status).toBe(403);
+    const payload = (await response.json()) as {
+      error: {
+        code: string;
+      };
+    };
+    expect(payload.error.code).toBe('AUTH_FORBIDDEN');
+  });
+
+  it('returns queue health counts for admins', async () => {
+    const cookie = await getAuthCookie('admin@shoppilot.local');
+
+    const response = await fetch(`${baseUrl}/orders/admin/queue-health`, {
+      headers: {
+        cookie,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as typeof queueHealthSnapshot;
+    expect(payload).toEqual(queueHealthSnapshot);
   });
 });
