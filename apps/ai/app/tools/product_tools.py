@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from app.config.settings import get_settings
+from app.observability import traceable
 from app.schemas import (
     CompareItemsToolInput,
     CompareItemsToolOutput,
@@ -31,6 +32,7 @@ class AssistantTools:
         self._search_service = search_service
         self._repository = repository
 
+    @traceable(run_type='tool', name='ai.tool.search_items')
     def search_items(self, payload: SearchItemsToolInput) -> SearchItemsToolOutput:
         parsed_intent = parse_intent(payload.query)
         filters = RetrievalFilters(
@@ -73,12 +75,14 @@ class AssistantTools:
             total_matches=len(retrieval.products),
         )
 
+    @traceable(run_type='tool', name='ai.tool.get_item_details')
     def get_item_details(self, payload: GetItemDetailsToolInput) -> GetItemDetailsToolOutput:
         products = self._repository.get_products_by_ids([payload.product_id])
         if not products:
             return GetItemDetailsToolOutput(item=None)
         return GetItemDetailsToolOutput(item=_to_product_item(products[0]))
 
+    @traceable(run_type='tool', name='ai.tool.compare_items')
     def compare_items(self, payload: CompareItemsToolInput) -> CompareItemsToolOutput:
         unique_ids: list[str] = []
         for product_id in payload.product_ids:

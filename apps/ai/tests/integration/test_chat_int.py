@@ -32,6 +32,9 @@ class _StubWorkflow:
 class _NoopSynthesizer:
     provider = 'gemini'
     enabled = False
+    model_name = 'gemini-2.5-flash'
+    max_tokens = 220
+    top_n_products = 3
 
     def synthesize(self, **kwargs):  # noqa: ANN003, ANN204
         raise RuntimeError('disabled')

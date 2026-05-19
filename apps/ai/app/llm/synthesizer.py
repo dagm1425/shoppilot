@@ -59,6 +59,9 @@ class AssistantSynthesisResult(BaseModel):
     assistant_message: str
     follow_up_prompts: list[str] = Field(default_factory=list)
     comparison_summary: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 class AssistantSynthesizer:
@@ -88,6 +91,18 @@ class AssistantSynthesizer:
     @property
     def provider(self) -> str:
         return self._provider
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    @property
+    def max_tokens(self) -> int:
+        return self._max_tokens
+
+    @property
+    def top_n_products(self) -> int:
+        return self._top_n_products
 
     def build_system_prompt(self) -> str:
         return (
@@ -165,10 +180,14 @@ class AssistantSynthesizer:
         content = _extract_response_text(response=response)
         parsed = _load_json_payload(content=content)
         payload = _AssistantSynthesisPayload.model_validate(parsed)
+        token_usage = _extract_token_usage(response=response)
         return AssistantSynthesisResult(
             assistant_message=payload.assistant_message,
             follow_up_prompts=payload.follow_up_prompts,
             comparison_summary=payload.comparison_summary,
+            prompt_tokens=token_usage['prompt'],
+            completion_tokens=token_usage['completion'],
+            total_tokens=token_usage['total'],
         )
 
 
@@ -222,3 +241,63 @@ def _load_json_payload(*, content: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError('LLM synthesis output must be a JSON object.')
     return parsed
+
+
+def _extract_token_usage(*, response: Any) -> dict[str, int | None]:
+    usage_metadata = getattr(response, 'usage_metadata', None)
+    if usage_metadata is None:
+        usage_metadata = getattr(response, 'usageMetadata', None)
+
+    if usage_metadata is None:
+        return {'prompt': None, 'completion': None, 'total': None}
+
+    prompt_tokens = _coerce_token_counter(
+        getattr(usage_metadata, 'prompt_token_count', None),
+        getattr(usage_metadata, 'promptTokenCount', None),
+        usage_metadata.get('prompt_token_count') if isinstance(usage_metadata, dict) else None,
+        usage_metadata.get('promptTokenCount') if isinstance(usage_metadata, dict) else None,
+    )
+    completion_tokens = _coerce_token_counter(
+        getattr(usage_metadata, 'candidates_token_count', None),
+        getattr(usage_metadata, 'completion_token_count', None),
+        getattr(usage_metadata, 'candidatesTokenCount', None),
+        getattr(usage_metadata, 'completionTokenCount', None),
+        usage_metadata.get('candidates_token_count') if isinstance(usage_metadata, dict) else None,
+        usage_metadata.get('completion_token_count') if isinstance(usage_metadata, dict) else None,
+        usage_metadata.get('candidatesTokenCount') if isinstance(usage_metadata, dict) else None,
+        usage_metadata.get('completionTokenCount') if isinstance(usage_metadata, dict) else None,
+    )
+    total_tokens = _coerce_token_counter(
+        getattr(usage_metadata, 'total_token_count', None),
+        getattr(usage_metadata, 'totalTokenCount', None),
+        usage_metadata.get('total_token_count') if isinstance(usage_metadata, dict) else None,
+        usage_metadata.get('totalTokenCount') if isinstance(usage_metadata, dict) else None,
+    )
+
+    return {
+        'prompt': prompt_tokens,
+        'completion': completion_tokens,
+        'total': total_tokens,
+    }
+
+
+def _coerce_token_counter(*candidates: Any) -> int | None:
+    for value in candidates:
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, float):
+            return max(0, int(value))
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped == '':
+                continue
+            try:
+                return max(0, int(float(stripped)))
+            except ValueError:
+                continue
+
+    return None

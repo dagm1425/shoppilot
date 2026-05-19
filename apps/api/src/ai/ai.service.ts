@@ -16,6 +16,16 @@ import {
   type AiChatResponse,
 } from './ai.schemas.js';
 
+const RUN_ID_HEADER = 'x-run-id';
+const THREAD_ID_HEADER = 'x-thread-id';
+const AI_PROVIDER_HEADER = 'x-ai-provider';
+const AI_MODEL_HEADER = 'x-ai-model';
+const AI_TOKEN_PROMPT_HEADER = 'x-ai-token-prompt';
+const AI_TOKEN_COMPLETION_HEADER = 'x-ai-token-completion';
+const AI_TOKEN_TOTAL_HEADER = 'x-ai-token-total';
+const AI_COST_ESTIMATE_HEADER = 'x-ai-cost-estimate-usd';
+const AI_FALLBACK_REASON_HEADER = 'x-ai-fallback-reason';
+
 type AiUpstreamErrorPayload = {
   error?: {
     code?: string;
@@ -33,9 +43,25 @@ type GatewayErrorMapping = {
 
 type UpstreamProxyContext = {
   requestId: string;
+  runId: string;
+  threadId: string;
   sessionId: string;
   userOrIpKey: string;
   upstreamPayload: unknown;
+};
+
+type UpstreamResponseTelemetry = {
+  runId: string;
+  threadId: string;
+  provider: string | null;
+  model: string | null;
+  tokenUsage: {
+    prompt: number | null;
+    completion: number | null;
+    total: number | null;
+  };
+  costEstimateUsd: number | null;
+  fallbackReason: string | null;
 };
 
 type OpenUpstreamRequestResult = {
@@ -60,13 +86,17 @@ export class AiService {
         '/ai/chat',
         context.upstreamPayload,
         context.requestId,
+        context.runId,
       );
       upstreamResponse = upstream.response;
       upstream.cleanupTimeout();
     } catch (error) {
       this.handleUpstreamRequestError({
         error,
+        route: '/ai/chat',
         requestId: context.requestId,
+        runId: context.runId,
+        threadId: context.threadId,
         sessionId: context.sessionId,
         userOrIpKey: context.userOrIpKey,
         startedAt,
@@ -79,7 +109,10 @@ export class AiService {
       const mapped = this.mapUpstreamStatus(upstreamResponse.status);
 
       this.logGatewayEvent({
+        route: '/ai/chat',
         requestId: context.requestId,
+        runId: context.runId,
+        threadId: context.threadId,
         sessionId: context.sessionId,
         userOrIpKey: context.userOrIpKey,
         status: mapped.status,
@@ -93,21 +126,32 @@ export class AiService {
         mapped.errorType,
         context.requestId,
         'json',
+        context.runId,
+        context.threadId,
       );
 
       this.throwMappedGatewayError(mapped);
     }
 
     const responsePayload = await this.parseUpstreamSuccessPayload(upstreamResponse);
+    const telemetry = this.extractUpstreamTelemetry(upstreamResponse.headers, context);
 
     this.logGatewayEvent({
+      route: '/ai/chat',
       requestId: context.requestId,
+      runId: telemetry.runId,
+      threadId: telemetry.threadId,
       sessionId: responsePayload.sessionId,
       userOrIpKey: context.userOrIpKey,
       status: HttpStatus.OK,
       latencyMs: Date.now() - startedAt,
       outcome: 'success',
       transport: 'json',
+      provider: telemetry.provider,
+      model: telemetry.model,
+      tokenUsage: telemetry.tokenUsage,
+      costEstimateUsd: telemetry.costEstimateUsd,
+      fallbackReason: telemetry.fallbackReason,
     });
 
     return responsePayload;
@@ -126,6 +170,8 @@ export class AiService {
       event: 'ai.gateway.stream_started',
       timestamp: new Date().toISOString(),
       request_id: context.requestId,
+      run_id: context.runId,
+      thread_id: context.threadId,
       session_id: context.sessionId,
       user_or_ip_key: context.userOrIpKey,
       transport: 'sse',
@@ -137,11 +183,15 @@ export class AiService {
         '/ai/chat/stream',
         context.upstreamPayload,
         context.requestId,
+        context.runId,
       );
     } catch (error) {
       this.handleUpstreamRequestError({
         error,
+        route: '/ai/chat/stream',
         requestId: context.requestId,
+        runId: context.runId,
+        threadId: context.threadId,
         sessionId: context.sessionId,
         userOrIpKey: context.userOrIpKey,
         startedAt,
@@ -157,7 +207,10 @@ export class AiService {
       const mapped = this.mapUpstreamStatus(upstreamResponse.status);
 
       this.logGatewayEvent({
+        route: '/ai/chat/stream',
         requestId: context.requestId,
+        runId: context.runId,
+        threadId: context.threadId,
         sessionId: context.sessionId,
         userOrIpKey: context.userOrIpKey,
         status: mapped.status,
@@ -172,16 +225,22 @@ export class AiService {
         mapped.errorType,
         context.requestId,
         'sse',
+        context.runId,
+        context.threadId,
       );
 
       this.throwMappedGatewayError(mapped);
     }
 
+    const telemetry = this.extractUpstreamTelemetry(upstreamResponse.headers, context);
     const streamBody = upstreamResponse.body;
     if (!streamBody) {
       const mapped = this.mapUpstreamStatus(HttpStatus.BAD_GATEWAY);
       this.logGatewayEvent({
+        route: '/ai/chat/stream',
         requestId: context.requestId,
+        runId: telemetry.runId,
+        threadId: telemetry.threadId,
         sessionId: context.sessionId,
         userOrIpKey: context.userOrIpKey,
         status: mapped.status,
@@ -194,6 +253,8 @@ export class AiService {
         'upstream_unavailable',
         context.requestId,
         'sse',
+        telemetry.runId,
+        telemetry.threadId,
       );
       throw new HttpException(
         {
@@ -207,9 +268,33 @@ export class AiService {
     const contentType = upstreamResponse.headers.get('content-type') ?? 'text/event-stream';
     response.status(HttpStatus.OK);
     response.setHeader(REQUEST_ID_HEADER, context.requestId);
+    response.setHeader(RUN_ID_HEADER, telemetry.runId);
+    response.setHeader(THREAD_ID_HEADER, telemetry.threadId);
     response.setHeader('content-type', contentType);
     response.setHeader('cache-control', 'no-cache, no-transform');
     response.setHeader('connection', 'keep-alive');
+
+    if (telemetry.provider) {
+      response.setHeader(AI_PROVIDER_HEADER, telemetry.provider);
+    }
+    if (telemetry.model) {
+      response.setHeader(AI_MODEL_HEADER, telemetry.model);
+    }
+    if (telemetry.tokenUsage.prompt !== null) {
+      response.setHeader(AI_TOKEN_PROMPT_HEADER, String(telemetry.tokenUsage.prompt));
+    }
+    if (telemetry.tokenUsage.completion !== null) {
+      response.setHeader(AI_TOKEN_COMPLETION_HEADER, String(telemetry.tokenUsage.completion));
+    }
+    if (telemetry.tokenUsage.total !== null) {
+      response.setHeader(AI_TOKEN_TOTAL_HEADER, String(telemetry.tokenUsage.total));
+    }
+    if (telemetry.costEstimateUsd !== null) {
+      response.setHeader(AI_COST_ESTIMATE_HEADER, telemetry.costEstimateUsd.toFixed(8));
+    }
+    if (telemetry.fallbackReason) {
+      response.setHeader(AI_FALLBACK_REASON_HEADER, telemetry.fallbackReason);
+    }
 
     if (typeof response.flushHeaders === 'function') {
       response.flushHeaders();
@@ -248,18 +333,29 @@ export class AiService {
       }
 
       this.logGatewayEvent({
+        route: '/ai/chat/stream',
         requestId: context.requestId,
+        runId: telemetry.runId,
+        threadId: telemetry.threadId,
         sessionId: context.sessionId,
         userOrIpKey: context.userOrIpKey,
         status: HttpStatus.OK,
         latencyMs: Date.now() - startedAt,
         outcome: 'success',
         transport: 'sse',
+        provider: telemetry.provider,
+        model: telemetry.model,
+        tokenUsage: telemetry.tokenUsage,
+        costEstimateUsd: telemetry.costEstimateUsd,
+        fallbackReason: telemetry.fallbackReason,
       });
     } catch (error) {
       const aborted = this.isAbortLikeError(error);
       this.logGatewayEvent({
+        route: '/ai/chat/stream',
         requestId: context.requestId,
+        runId: telemetry.runId,
+        threadId: telemetry.threadId,
         sessionId: context.sessionId,
         userOrIpKey: context.userOrIpKey,
         status: aborted ? HttpStatus.OK : HttpStatus.BAD_GATEWAY,
@@ -274,6 +370,8 @@ export class AiService {
           'stream_proxy_error',
           context.requestId,
           'sse',
+          telemetry.runId,
+          telemetry.threadId,
         );
       }
 
@@ -291,6 +389,7 @@ export class AiService {
     path: '/ai/chat' | '/ai/chat/stream',
     body: unknown,
     requestId: string,
+    runId: string,
   ): Promise<OpenUpstreamRequestResult> {
     const abortController = new AbortController();
     const timeout = setTimeout(() => {
@@ -303,6 +402,7 @@ export class AiService {
         headers: {
           'content-type': 'application/json',
           [REQUEST_ID_HEADER]: requestId,
+          [RUN_ID_HEADER]: runId,
         },
         body: JSON.stringify(body),
         signal: abortController.signal,
@@ -394,6 +494,8 @@ export class AiService {
     const userOrIpKey = this.resolveUserOrIpKey(request);
     const sanitizedUserId = this.resolveSanitizedUserId(request, userOrIpKey);
     const authScope = request.user?.role ?? 'ANONYMOUS';
+    const runId = request.header(RUN_ID_HEADER)?.trim() || `run-${randomUUID()}`;
+    const threadId = `${sanitizedUserId}:${input.sessionId}`;
 
     const upstreamPayload = aiUpstreamChatRequestSchema.parse({
       message: input.message,
@@ -408,6 +510,8 @@ export class AiService {
 
     return {
       requestId,
+      runId,
+      threadId,
       sessionId: input.sessionId,
       userOrIpKey,
       upstreamPayload,
@@ -416,7 +520,10 @@ export class AiService {
 
   private handleUpstreamRequestError(input: {
     error: unknown;
+    route: '/ai/chat' | '/ai/chat/stream';
     requestId: string;
+    runId: string;
+    threadId: string;
     sessionId: string;
     userOrIpKey: string;
     startedAt: number;
@@ -438,7 +545,10 @@ export class AiService {
         } satisfies GatewayErrorMapping);
 
     this.logGatewayEvent({
+      route: input.route,
       requestId: input.requestId,
+      runId: input.runId,
+      threadId: input.threadId,
       sessionId: input.sessionId,
       userOrIpKey: input.userOrIpKey,
       status: mapped.status,
@@ -451,6 +561,8 @@ export class AiService {
       mapped.errorType,
       input.requestId,
       input.transport,
+      input.runId,
+      input.threadId,
     );
 
     this.throwMappedGatewayError(mapped);
@@ -502,12 +614,20 @@ export class AiService {
     errorType: string,
     requestId: string,
     transport: 'json' | 'sse',
+    runId?: string,
+    threadId?: string,
   ): void {
     Sentry.withScope((scope) => {
       scope.setTag('flow', 'ai_assistant');
       scope.setTag('transport', transport);
       scope.setTag('error_type', errorType);
       scope.setTag('request_id', requestId);
+      if (runId) {
+        scope.setTag('run_id', runId);
+      }
+      if (threadId) {
+        scope.setTag('thread_id', threadId);
+      }
       Sentry.captureException(error);
     });
   }
@@ -534,7 +654,10 @@ export class AiService {
   }
 
   private logGatewayEvent(input: {
+    route: '/ai/chat' | '/ai/chat/stream';
     requestId: string;
+    runId: string;
+    threadId: string;
     sessionId: string;
     userOrIpKey: string;
     status: number;
@@ -543,17 +666,36 @@ export class AiService {
     transport?: 'json' | 'sse';
     upstreamStatus?: number;
     upstreamCode?: string;
+    provider?: string | null;
+    model?: string | null;
+    tokenUsage?: {
+      prompt: number | null;
+      completion: number | null;
+      total: number | null;
+    };
+    costEstimateUsd?: number | null;
+    fallbackReason?: string | null;
   }): void {
     this.logger.log({
       event: 'ai.gateway.proxy',
       timestamp: new Date().toISOString(),
+      route: input.route,
       request_id: input.requestId,
+      run_id: input.runId,
+      thread_id: input.threadId,
       session_id: input.sessionId,
       user_or_ip_key: input.userOrIpKey,
       status: input.status,
       latency_ms: input.latencyMs,
       outcome: input.outcome,
       transport: input.transport ?? 'json',
+      llm_provider: input.provider,
+      llm_model: input.model,
+      token_usage_prompt: input.tokenUsage?.prompt ?? null,
+      token_usage_completion: input.tokenUsage?.completion ?? null,
+      token_usage_total: input.tokenUsage?.total ?? null,
+      cost_estimate_usd: input.costEstimateUsd ?? null,
+      fallback_reason: input.fallbackReason ?? null,
       ...(input.upstreamStatus
         ? {
             upstream_status: input.upstreamStatus,
@@ -565,6 +707,42 @@ export class AiService {
           }
         : {}),
     });
+  }
+
+  private extractUpstreamTelemetry(
+    headers: Headers,
+    context: UpstreamProxyContext,
+  ): UpstreamResponseTelemetry {
+    const tokenPrompt = this.parseNumericHeader(headers.get(AI_TOKEN_PROMPT_HEADER));
+    const tokenCompletion = this.parseNumericHeader(headers.get(AI_TOKEN_COMPLETION_HEADER));
+    const tokenTotal = this.parseNumericHeader(headers.get(AI_TOKEN_TOTAL_HEADER));
+
+    return {
+      runId: headers.get(RUN_ID_HEADER)?.trim() || context.runId,
+      threadId: headers.get(THREAD_ID_HEADER)?.trim() || context.threadId,
+      provider: headers.get(AI_PROVIDER_HEADER)?.trim() || null,
+      model: headers.get(AI_MODEL_HEADER)?.trim() || null,
+      tokenUsage: {
+        prompt: tokenPrompt,
+        completion: tokenCompletion,
+        total: tokenTotal,
+      },
+      costEstimateUsd: this.parseNumericHeader(headers.get(AI_COST_ESTIMATE_HEADER)),
+      fallbackReason: headers.get(AI_FALLBACK_REASON_HEADER)?.trim() || null,
+    };
+  }
+
+  private parseNumericHeader(rawValue: string | null): number | null {
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+
+    return parsed;
   }
 
   private isAbortLikeError(error: unknown): boolean {

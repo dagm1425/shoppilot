@@ -1,0 +1,318 @@
+{
+  "datasetId": "phase-4-5-evals-v1",
+  "version": "1.0.0",
+  "description": "Phase 4.5 evaluation set for tracing, budgets, routing, refinement memory, fallback, and stream correlation.",
+  "cases": [
+    {
+      "id": "EVAL-001-structured-budget",
+      "category": "budget-constraints",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "Show in-stock tops under 80 dollars with rating at least 4",
+          "sessionId": "eval-001-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "retrievalMode": "structured",
+        "minRecommendedProductIds": 1,
+        "expectRunId": true,
+        "expectThreadId": true,
+        "expectNoResults": false
+      },
+      "passCriteria": [
+        "Response succeeds and keeps hard constraints in retrieval mode.",
+        "At least one recommendation is returned.",
+        "x-run-id and x-thread-id headers are present for correlation."
+      ]
+    },
+    {
+      "id": "EVAL-002-semantic-query",
+      "category": "retrieval-mode",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "I need lightweight breathable gym tops for daily training",
+          "sessionId": "eval-002-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "retrievalMode": "semantic",
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "Semantic-only query routes to semantic retrieval.",
+        "Correlation headers are still present."
+      ]
+    },
+    {
+      "id": "EVAL-003-hybrid-query",
+      "category": "retrieval-mode",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "Find premium men tops under 120 with rating over 4",
+          "sessionId": "eval-003-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "retrievalMode": "hybrid",
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "Query with explicit filters plus semantic intent routes to hybrid retrieval.",
+        "No crash when combining hard and fuzzy constraints."
+      ]
+    },
+    {
+      "id": "EVAL-004-refinement-merge",
+      "category": "follow-up-refinement",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "Show in-stock tops under 80",
+          "sessionId": "eval-004-session",
+          "userId": "eval-user-1"
+        },
+        {
+          "message": "Make those premium for men",
+          "sessionId": "eval-004-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "expectRunId": true,
+        "expectThreadId": true,
+        "expectNoResults": false
+      },
+      "passCriteria": [
+        "Second turn keeps same thread memory and merges constraints.",
+        "Response remains successful on refinement turn."
+      ]
+    },
+    {
+      "id": "EVAL-005-reset-command",
+      "category": "reset-flow",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "Show me in-stock tops under 60",
+          "sessionId": "eval-005-session",
+          "userId": "eval-user-1"
+        },
+        {
+          "message": "reset and show breathable tops",
+          "sessionId": "eval-005-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "Reset turn succeeds and clears prior constraints/context.",
+        "Response remains coherent without stale filters leaking."
+      ]
+    },
+    {
+      "id": "EVAL-006-no-result",
+      "category": "no-result",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "Find in-stock tops under 1 dollar with rating at least 5",
+          "sessionId": "eval-006-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "expectNoResults": true,
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "No-result path returns graceful assistant guidance.",
+        "No exception escapes to the caller."
+      ]
+    },
+    {
+      "id": "EVAL-007-compare-reuse",
+      "category": "comparison-flow",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "Recommend tops under 100",
+          "sessionId": "eval-007-session",
+          "userId": "eval-user-1"
+        },
+        {
+          "message": "compare the top two options",
+          "sessionId": "eval-007-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "Comparison follow-up on same thread succeeds.",
+        "Comparison summary is present in recommendation payload when available."
+      ]
+    },
+    {
+      "id": "EVAL-008-compare-with-refinement",
+      "category": "comparison-flow",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "Recommend tops under 100",
+          "sessionId": "eval-008-session",
+          "userId": "eval-user-1"
+        },
+        {
+          "message": "compare options but only premium picks",
+          "sessionId": "eval-008-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "Comparison with new constraints still succeeds.",
+        "Graph can re-enter retrieval path on refinement turn."
+      ]
+    },
+    {
+      "id": "EVAL-009-session-isolation",
+      "category": "session-isolation",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "Recommend premium tops for men",
+          "sessionId": "eval-009-session-a",
+          "userId": "eval-user-1"
+        },
+        {
+          "message": "compare the top two options",
+          "sessionId": "eval-009-session-b",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "Different session IDs do not leak recommendation memory.",
+        "Second turn on isolated session handles missing prior context gracefully."
+      ]
+    },
+    {
+      "id": "EVAL-010-sse-happy-path",
+      "category": "sse-transport",
+      "transport": "sse",
+      "steps": [
+        {
+          "transport": "sse",
+          "message": "Recommend running tops under 100",
+          "sessionId": "eval-010-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "expectRunId": true,
+        "expectThreadId": true,
+        "expectRunFinishedEvent": true
+      },
+      "passCriteria": [
+        "SSE emits RUN_STARTED, STATE_SNAPSHOT, and RUN_FINISHED.",
+        "x-run-id and x-thread-id headers are present for stream correlation."
+      ]
+    },
+    {
+      "id": "EVAL-011-validation-error",
+      "category": "validation-failure",
+      "transport": "json",
+      "steps": [
+        {
+          "message": "",
+          "sessionId": "eval-011-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 422,
+        "errorCode": "AI_VALIDATION_ERROR",
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "Typed validation error is returned for invalid payload.",
+        "Correlation headers still exist on error responses."
+      ]
+    },
+    {
+      "id": "EVAL-012-synthesis-fallback-manual",
+      "category": "fallback",
+      "manualOnly": true,
+      "manualReason": "Requires controlled synthesis failure injection (e.g., invalid provider key or temporary synthesis disable toggle).",
+      "steps": [
+        {
+          "message": "Recommend breathable tops under 90",
+          "sessionId": "eval-012-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "Assistant returns deterministic fallback messaging when synthesis fails.",
+        "Fallback reason appears in logs/traces and response remains non-crashing."
+      ]
+    },
+    {
+      "id": "EVAL-013-retry-guard-manual",
+      "category": "retry-guard",
+      "manualOnly": true,
+      "manualReason": "Requires synthetic tool failure injection to verify single retry guard path.",
+      "steps": [
+        {
+          "message": "Recommend tops under 70",
+          "sessionId": "eval-013-session",
+          "userId": "eval-user-1"
+        }
+      ],
+      "expectations": {
+        "httpStatus": 200,
+        "expectRunId": true,
+        "expectThreadId": true
+      },
+      "passCriteria": [
+        "Validation/tool failure path retries once then exits gracefully.",
+        "No unbounded retry loop occurs."
+      ]
+    }
+  ]
+}

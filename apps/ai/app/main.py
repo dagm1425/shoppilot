@@ -5,10 +5,9 @@ import logging
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from app.api.router import api_router
 from app.config.settings import get_settings
 from app.errors import register_exception_handlers
-from app.observability import initialize_sentry
+from app.observability import initialize_langsmith, initialize_sentry
 from app.request_id import attach_request_id_middleware
 
 logging.basicConfig(
@@ -36,6 +35,8 @@ def create_app() -> FastAPI:
 
     app.state.settings = settings
 
+    initialize_langsmith(settings)
+
     if settings.llm_synthesis_uses_deprecated_openai_aliases:
         logger.warning(
             {
@@ -50,6 +51,8 @@ def create_app() -> FastAPI:
     initialize_sentry(settings)
 
     register_exception_handlers(app)
+
+    from app.api.router import api_router
 
     # Versioned API router for forward compatibility.
     app.include_router(api_router, prefix='/v1')

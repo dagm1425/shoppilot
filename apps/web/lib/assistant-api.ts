@@ -70,6 +70,14 @@ const runErrorEventSchema = z
   })
   .strict();
 
+const runStartedEventSchema = z
+  .object({
+    type: z.literal('RUN_STARTED'),
+    runId: nonEmptyString,
+    threadId: nonEmptyString,
+  })
+  .strict();
+
 type ApiError = {
   error?: {
     code?: string;
@@ -89,12 +97,14 @@ export type AssistantStreamError = {
 
 export type AssistantStreamHandlers = {
   signal?: AbortSignal;
-  onRunStarted?: () => void;
+  onRunStarted?: (input: { runId: string | null; threadId: string | null }) => void;
   onTextDelta?: (delta: string) => void;
   onSnapshot?: (snapshot: AssistantApiChatResponse) => void;
   onFinished?: (snapshot: AssistantApiChatResponse) => void;
   onError?: (error: AssistantStreamError) => void;
 };
+
+const RUN_ID_HEADER = 'x-run-id';
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -270,6 +280,8 @@ export async function streamAssistantMessage(
   }
 
   let latestSnapshot: AssistantApiChatResponse | null = null;
+  let streamRunId: string | null = response.headers.get(RUN_ID_HEADER);
+  let streamThreadId: string | null = null;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const parseChunk = createSseBlockParser((block) => {
@@ -298,7 +310,12 @@ export async function streamAssistantMessage(
         : parsedBlock.eventName;
 
     if (eventType === 'RUN_STARTED') {
-      handlers.onRunStarted?.();
+      const parsed = runStartedEventSchema.safeParse(parsedData);
+      if (parsed.success) {
+        streamRunId = parsed.data.runId;
+        streamThreadId = parsed.data.threadId;
+      }
+      handlers.onRunStarted?.({ runId: streamRunId, threadId: streamThreadId });
       return;
     }
 
@@ -393,6 +410,8 @@ export async function streamAssistantMessage(
     message: 'assistant.stream.completed',
     data: {
       request_id: requestId,
+      run_id: streamRunId,
+      thread_id: streamThreadId,
       session_id: parsedInput.sessionId,
       has_snapshot: latestSnapshot !== null,
     },

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from time import perf_counter
 from uuid import uuid4
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -19,6 +20,7 @@ class StreamEnvelope(BaseModel):
     message_id: str
     thread_id: str
     chat_response: ChatResponse
+    telemetry: dict[str, Any]
 
 
 def build_placeholder_response(payload: ChatRequest, *, model_name: str) -> ChatResponse:
@@ -40,36 +42,106 @@ def build_placeholder_response(payload: ChatRequest, *, model_name: str) -> Chat
     )
 
 
-def build_chat_response(payload: ChatRequest, *, model_name: str) -> ChatResponse:
+def build_chat_response(
+    payload: ChatRequest,
+    *,
+    model_name: str,
+    run_id: str,
+    transport: Literal['json', 'sse'],
+) -> tuple[ChatResponse, dict[str, Any]]:
     started_at = perf_counter()
-    response = get_assistant_workflow().run(payload)
+    response, telemetry = _run_workflow(payload, run_id=run_id, transport=transport)
     duration_ms = int((perf_counter() - started_at) * 1000)
 
     response.model = model_name
+    if telemetry.get('llm_model') is None:
+        telemetry['llm_model'] = model_name
+
+    thread_id = str(telemetry.get('thread_id') or f'{payload.user_context.user_id}:{payload.session_id}')
 
     logger.info(
         {
             'event': 'ai.graph_response_completed',
             'request_id': payload.request_id,
+            'run_id': telemetry.get('run_id', run_id),
             'session_id': payload.session_id,
-            'thread_id': f'{payload.user_context.user_id}:{payload.session_id}',
+            'thread_id': thread_id,
+            'transport': transport,
             'ai_retrieval_mode': response.retrieval_mode,
             'result_count': len(response.recommended_product_ids),
             'latency_ms': duration_ms,
+            'llm_provider': telemetry.get('llm_provider'),
+            'llm_model': telemetry.get('llm_model', model_name),
+            'token_usage_prompt': telemetry.get('token_usage_prompt'),
+            'token_usage_completion': telemetry.get('token_usage_completion'),
+            'token_usage_total': telemetry.get('token_usage_total'),
+            'cost_estimate_usd': telemetry.get('cost_estimate_usd'),
+            'fallback_reason': telemetry.get('fallback_reason'),
+            'budget_top_k': telemetry.get('budget_top_k'),
+            'budget_top_n_products': telemetry.get('budget_top_n_products'),
+            'budget_max_output_tokens': telemetry.get('budget_max_output_tokens'),
+            'outcome': 'success',
         },
     )
 
-    return response
+    return response, telemetry
 
 
-def build_chat_stream_envelope(payload: ChatRequest, *, model_name: str) -> StreamEnvelope:
-    response = build_chat_response(payload, model_name=model_name)
+def build_chat_stream_envelope(payload: ChatRequest, *, model_name: str, run_id: str) -> StreamEnvelope:
+    response, telemetry = build_chat_response(
+        payload,
+        model_name=model_name,
+        run_id=run_id,
+        transport='sse',
+    )
+
+    thread_id = str(telemetry.get('thread_id') or f'{payload.user_context.user_id}:{payload.session_id}')
 
     return StreamEnvelope(
-        run_id=f'run-{uuid4()}',
+        run_id=run_id,
         message_id=f'msg-{uuid4()}',
-        thread_id=f'{payload.user_context.user_id}:{payload.session_id}',
+        thread_id=thread_id,
         chat_response=response,
+        telemetry=telemetry,
+    )
+
+
+def _run_workflow(
+    payload: ChatRequest,
+    *,
+    run_id: str,
+    transport: Literal['json', 'sse'],
+) -> tuple[ChatResponse, dict[str, Any]]:
+    workflow = get_assistant_workflow()
+
+    if hasattr(workflow, 'run_with_telemetry'):
+        response, telemetry = workflow.run_with_telemetry(  # type: ignore[attr-defined]
+            payload,
+            run_id=run_id,
+            transport=transport,
+        )
+        return response, dict(telemetry)
+
+    response = workflow.run(payload)
+    return (
+        response,
+        {
+            'request_id': payload.request_id,
+            'run_id': run_id,
+            'thread_id': f'{payload.user_context.user_id}:{payload.session_id}',
+            'transport': transport,
+            'retrieval_mode': response.retrieval_mode,
+            'llm_model': response.model,
+            'llm_provider': None,
+            'token_usage_prompt': None,
+            'token_usage_completion': None,
+            'token_usage_total': None,
+            'cost_estimate_usd': None,
+            'fallback_reason': None,
+            'budget_top_k': None,
+            'budget_top_n_products': None,
+            'budget_max_output_tokens': None,
+        },
     )
 
 

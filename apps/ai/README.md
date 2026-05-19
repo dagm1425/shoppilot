@@ -1,4 +1,4 @@
-# ShopPilot AI Service (Phase 4.2 Retrieval)
+# ShopPilot AI Service (Phase 4.5 Tracing + Evals)
 
 This service provides the FastAPI foundation for the AI assistant.
 
@@ -18,8 +18,24 @@ uvicorn app.main:app --host 0.0.0.0 --port 8001
 
 - `GET /health`
 - `POST /ai/chat`
+- `POST /ai/chat/stream`
 - `GET /v1/health`
 - `POST /v1/ai/chat`
+- `POST /v1/ai/chat/stream`
+
+## Phase 4.5 tracing toggles
+
+LangSmith tracing is opt-in and enabled only when all of these are set:
+
+```bash
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your-langsmith-key
+LANGCHAIN_PROJECT=your-langsmith-project
+# optional
+LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+```
+
+When enabled, graph/tool/synthesis runs include request/thread/run correlation metadata.
 
 ## Rebuild the product vector index
 
@@ -93,3 +109,21 @@ If deprecated aliases are used, the service logs a startup warning.
 - embedding path stays explicitly Gemini-based and unchanged by synthesis migration
 
 Migration note: OpenAI synthesis runtime usage has been removed from `apps/ai`.
+
+## Replay the Phase 4.5 eval dataset
+
+Use the non-test eval runner to replay dataset cases against the gateway:
+
+```bash
+cd apps/ai
+python -m app.cli run-evals --base-url http://localhost:3001
+```
+
+Override dataset path or timeout when needed:
+
+```bash
+python -m app.cli run-evals \
+  --dataset ./evals/phase-4-5-eval-dataset.json \
+  --base-url http://localhost:3001 \
+  --timeout-seconds 20
+```

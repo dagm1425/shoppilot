@@ -79,7 +79,12 @@ def test_build_chat_response_delegates_to_workflow_and_sets_model(monkeypatch) -
         lambda: stub_workflow,
     )
 
-    result = build_chat_response(payload, model_name='gpt-4.1-mini')
+    result, telemetry = build_chat_response(
+        payload,
+        model_name='gpt-4.1-mini',
+        run_id='run-test-1',
+        transport='json',
+    )
 
     assert len(stub_workflow.calls) == 1
     assert stub_workflow.calls[0].request_id == 'request-1'
@@ -90,6 +95,8 @@ def test_build_chat_response_delegates_to_workflow_and_sets_model(monkeypatch) -
     assert result.retrieval_mode == 'hybrid'
     assert result.recommended_product_ids == ['essential-cropped-tee']
     assert len(result.recommendations) == 1
+    assert telemetry['run_id'] == 'run-test-1'
+    assert telemetry['thread_id'] == 'user-1:session-1'
 
 
 def test_build_chat_response_preserves_graceful_no_result_shape(monkeypatch) -> None:
@@ -112,10 +119,16 @@ def test_build_chat_response_preserves_graceful_no_result_shape(monkeypatch) -> 
         lambda: stub_workflow,
     )
 
-    result = build_chat_response(payload, model_name='gpt-4.1-mini')
+    result, telemetry = build_chat_response(
+        payload,
+        model_name='gpt-4.1-mini',
+        run_id='run-test-2',
+        transport='json',
+    )
 
     assert result.placeholder is False
     assert result.recommendations == []
     assert result.recommended_product_ids == []
     assert result.retrieval_mode == 'structured'
     assert 'no products found' in result.assistant_message.lower()
+    assert telemetry['run_id'] == 'run-test-2'

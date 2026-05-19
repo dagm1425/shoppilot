@@ -4,6 +4,7 @@ pydantic>=2.7,<3.0
 pydantic-settings>=2.2,<3.0
 google-genai>=1.0,<2.0
 langgraph>=0.2.46,<1.0
+langsmith>=0.1.125,<1.0
 chromadb>=0.5.8,<1.0
 psycopg[binary]>=3.2,<4.0
 sentry-sdk>=2.8,<3.0

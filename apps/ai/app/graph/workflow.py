@@ -15,7 +15,8 @@ except ImportError:  # pragma: no cover - compatibility for pre-rename releases
     from langgraph.checkpoint.memory import InMemorySaver as MemorySaver
 
 from app.llm.synthesizer import AssistantSynthesizer
-from app.observability import capture_sentry_exception
+from app.llm.pricing import estimate_request_cost_usd
+from app.observability import capture_sentry_exception, traceable
 from app.schemas import (
     AgentState,
     ChatRequest,
@@ -47,9 +48,11 @@ _RETRY_LIMIT = 1
 class AssistantGraphState(TypedDict, total=False):
     query: str
     request_id: str
+    run_id: str
     session_id: str
     user_id: str
     thread_id: str
+    transport: Literal['json', 'sse']
     semantic_query: str
     merged_semantic_query: str
     semantic_facets: dict[str, str]
@@ -68,7 +71,35 @@ class AssistantGraphState(TypedDict, total=False):
     validation_error: str | None
     assistant_message: str
     follow_up_prompts: list[str]
+    llm_provider: str | None
+    llm_model: str | None
+    token_usage_prompt: int | None
+    token_usage_completion: int | None
+    token_usage_total: int | None
+    cost_estimate_usd: float | None
+    fallback_reason: str | None
+    budget_top_k: int
+    budget_top_n_products: int
+    budget_max_output_tokens: int
     terminal_status: Literal['success', 'no_results', 'retry_exhausted']
+
+
+class AssistantRunTelemetry(TypedDict):
+    request_id: str
+    run_id: str
+    thread_id: str
+    transport: Literal['json', 'sse']
+    retrieval_mode: Literal['structured', 'semantic', 'hybrid'] | None
+    llm_provider: str | None
+    llm_model: str | None
+    token_usage_prompt: int | None
+    token_usage_completion: int | None
+    token_usage_total: int | None
+    cost_estimate_usd: float | None
+    fallback_reason: str | None
+    budget_top_k: int
+    budget_top_n_products: int
+    budget_max_output_tokens: int
 
 
 class AssistantGraphWorkflow:
@@ -78,30 +109,89 @@ class AssistantGraphWorkflow:
         tools: AssistantTools,
         synthesizer: AssistantSynthesizer,
         model_name: str,
+        search_top_k: int = 5,
     ) -> None:
         self._tools = tools
         self._synthesizer = synthesizer
         self._model_name = model_name
+        self._search_top_k = _clamp_int(search_top_k, min_value=1, max_value=20)
         self._graph = _compile_graph(self)
 
     def run(self, payload: ChatRequest) -> ChatResponse:
+        response, _telemetry = self.run_with_telemetry(payload)
+        return response
+
+    def run_with_telemetry(
+        self,
+        payload: ChatRequest,
+        *,
+        run_id: str | None = None,
+        transport: Literal['json', 'sse'] = 'json',
+    ) -> tuple[ChatResponse, AssistantRunTelemetry]:
+        return self._execute(payload, run_id=run_id, transport=transport)
+
+    def _execute(
+        self,
+        payload: ChatRequest,
+        *,
+        run_id: str | None,
+        transport: Literal['json', 'sse'],
+    ) -> tuple[ChatResponse, AssistantRunTelemetry]:
+        thread_id = _build_thread_id(
+            user_id=payload.user_context.user_id,
+            session_id=payload.session_id,
+        )
+        resolved_run_id = run_id.strip() if isinstance(run_id, str) and run_id.strip() else f'run-{payload.request_id}'
+        resolved_budget_top_n = _clamp_int(self._synthesizer.top_n_products, min_value=1, max_value=5)
+        resolved_budget_max_tokens = _clamp_int(self._synthesizer.max_tokens, min_value=64, max_value=800)
+
         initial_state: AssistantGraphState = {
             'query': payload.message,
             'request_id': payload.request_id,
+            'run_id': resolved_run_id,
             'session_id': payload.session_id,
             'user_id': payload.user_context.user_id,
-            'thread_id': _build_thread_id(
-                user_id=payload.user_context.user_id,
-                session_id=payload.session_id,
-            ),
+            'thread_id': thread_id,
+            'transport': transport,
             'retry_count': 0,
             'validation_error': None,
+            'llm_provider': self._synthesizer.provider,
+            'llm_model': self._synthesizer.model_name,
+            'fallback_reason': None,
+            'token_usage_prompt': None,
+            'token_usage_completion': None,
+            'token_usage_total': None,
+            'cost_estimate_usd': None,
+            'budget_top_k': self._search_top_k,
+            'budget_top_n_products': resolved_budget_top_n,
+            'budget_max_output_tokens': resolved_budget_max_tokens,
         }
+
+        logger.info(
+            {
+                'event': 'ai.graph.run_started',
+                'request_id': payload.request_id,
+                'run_id': resolved_run_id,
+                'thread_id': thread_id,
+                'transport': transport,
+                'budget_top_k': self._search_top_k,
+                'budget_top_n_products': resolved_budget_top_n,
+                'budget_max_output_tokens': resolved_budget_max_tokens,
+            },
+        )
 
         config = {
             'configurable': {
-                'thread_id': initial_state['thread_id'],
-            }
+                'thread_id': thread_id,
+            },
+            'run_name': 'assistant_graph',
+            'tags': ['ai_assistant', f'transport:{transport}'],
+            'metadata': {
+                'request_id': payload.request_id,
+                'run_id': resolved_run_id,
+                'thread_id': thread_id,
+                'transport': transport,
+            },
         }
 
         try:
@@ -112,7 +202,8 @@ class AssistantGraphWorkflow:
                 tags={
                     'ai_assistant_request': 'true',
                     'request_id': payload.request_id,
-                    'thread_id': initial_state['thread_id'],
+                    'run_id': resolved_run_id,
+                    'thread_id': thread_id,
                 },
             )
             raise
@@ -120,7 +211,7 @@ class AssistantGraphWorkflow:
         recommendation = _build_recommendation_from_state(state)
         recommended_ids = [product.product_id for product in recommendation.recommended_products]
 
-        return ChatResponse(
+        response = ChatResponse(
             request_id=payload.request_id,
             session_id=payload.session_id,
             assistant_message=state.get('assistant_message', recommendation.summary),
@@ -132,7 +223,29 @@ class AssistantGraphWorkflow:
             placeholder=False,
         )
 
+        telemetry: AssistantRunTelemetry = {
+            'request_id': payload.request_id,
+            'run_id': state.get('run_id', resolved_run_id),
+            'thread_id': state.get('thread_id', thread_id),
+            'transport': state.get('transport', transport),
+            'retrieval_mode': state.get('retrieval_mode'),
+            'llm_provider': state.get('llm_provider', self._synthesizer.provider),
+            'llm_model': state.get('llm_model', self._synthesizer.model_name),
+            'token_usage_prompt': state.get('token_usage_prompt'),
+            'token_usage_completion': state.get('token_usage_completion'),
+            'token_usage_total': state.get('token_usage_total'),
+            'cost_estimate_usd': state.get('cost_estimate_usd'),
+            'fallback_reason': state.get('fallback_reason'),
+            'budget_top_k': state.get('budget_top_k', self._search_top_k),
+            'budget_top_n_products': state.get('budget_top_n_products', resolved_budget_top_n),
+            'budget_max_output_tokens': state.get('budget_max_output_tokens', resolved_budget_max_tokens),
+        }
+
+        return response, telemetry
+
+    @traceable(run_type='chain', name='ai.graph.query_planning_node')
     def _query_planning_node(self, state: AssistantGraphState) -> AssistantGraphState:
+        _log_node_entered(state, node='query_planning')
         intent = parse_intent(state['query'])
         lowered_query = state['query'].lower()
         prior_recommended_ids = list(state.get('recommended_product_ids', []))
@@ -212,6 +325,7 @@ class AssistantGraphWorkflow:
                 {
                     'event': 'ai.graph.refinement_reset',
                     'request_id': state['request_id'],
+                    'run_id': state['run_id'],
                     'thread_id': state['thread_id'],
                 },
             )
@@ -220,6 +334,7 @@ class AssistantGraphWorkflow:
             {
                 'event': 'ai.graph.refinement_applied',
                 'request_id': state['request_id'],
+                'run_id': state['run_id'],
                 'thread_id': state['thread_id'],
                 'changed_filter_keys': sorted(filter_merge.changed_filter_keys),
                 'changed_facet_groups': sorted(semantic_merge.changed_facet_groups),
@@ -233,6 +348,7 @@ class AssistantGraphWorkflow:
             {
                 'event': 'ai.graph.query_planned',
                 'request_id': state['request_id'],
+                'run_id': state['run_id'],
                 'thread_id': state['thread_id'],
                 'ai_retrieval_mode': retrieval_mode,
                 'comparison_requested': comparison_requested,
@@ -257,18 +373,44 @@ class AssistantGraphWorkflow:
             'validation_error': None,
         }
 
+    @traceable(run_type='tool', name='ai.tool.search_items')
     def _product_retrieval_node(self, state: AssistantGraphState) -> AssistantGraphState:
+        _log_node_entered(state, node='product_retrieval')
         retrieval_query = (
             state.get('merged_semantic_query')
             or state.get('semantic_query')
             or state['query']
         )
+        requested_top_k = state.get('budget_top_k', self._search_top_k)
+        clamped_top_k = _clamp_int(requested_top_k, min_value=1, max_value=20)
+
+        logger.info(
+            {
+                'event': 'ai.tool.search_items_started',
+                'request_id': state['request_id'],
+                'run_id': state['run_id'],
+                'thread_id': state['thread_id'],
+                'input_shape': {
+                    'retrieval_mode': state.get('retrieval_mode'),
+                    'top_k': clamped_top_k,
+                    'has_category': state.get('normalized_filters', {}).get('category') is not None,
+                    'has_price_min': state.get('normalized_filters', {}).get('priceMinCents') is not None,
+                    'has_price_max': state.get('normalized_filters', {}).get('priceMaxCents') is not None,
+                    'has_availability': state.get('normalized_filters', {}).get('availability') is not None,
+                    'has_min_rating': state.get('normalized_filters', {}).get('minRating') is not None,
+                    'query_length': len(retrieval_query.strip()),
+                },
+                'budget_top_k': state.get('budget_top_k', self._search_top_k),
+                'budget_top_k_clamped': clamped_top_k,
+            },
+        )
+
         try:
             tool_input = SearchItemsToolInput.model_validate(
                 {
                     'query': retrieval_query,
                     'retrievalMode': state['retrieval_mode'],
-                    'topK': 5,
+                    'topK': clamped_top_k,
                     'category': state.get('normalized_filters', {}).get('category'),
                     'priceMinCents': state.get('normalized_filters', {}).get('priceMinCents'),
                     'priceMaxCents': state.get('normalized_filters', {}).get('priceMaxCents'),
@@ -278,6 +420,15 @@ class AssistantGraphWorkflow:
             )
             tool_output = self._tools.search_items(tool_input)
         except ValidationError as exc:
+            logger.warning(
+                {
+                    'event': 'ai.tool.search_items_failed',
+                    'request_id': state['request_id'],
+                    'run_id': state['run_id'],
+                    'thread_id': state['thread_id'],
+                    'failure_reason': 'input_validation',
+                },
+            )
             return {
                 'validation_error': f'search_items input validation failed: {exc.errors()}',
                 'tool_output': {},
@@ -288,7 +439,17 @@ class AssistantGraphWorkflow:
                 tags={
                     'ai_assistant_request': 'true',
                     'request_id': state['request_id'],
+                    'run_id': state['run_id'],
                     'thread_id': state['thread_id'],
+                },
+            )
+            logger.warning(
+                {
+                    'event': 'ai.tool.search_items_failed',
+                    'request_id': state['request_id'],
+                    'run_id': state['run_id'],
+                    'thread_id': state['thread_id'],
+                    'failure_reason': type(exc).__name__,
                 },
             )
             return {
@@ -300,10 +461,25 @@ class AssistantGraphWorkflow:
             {
                 'event': 'ai.graph.retrieval_completed',
                 'request_id': state['request_id'],
+                'run_id': state['run_id'],
                 'thread_id': state['thread_id'],
                 'ai_retrieval_mode': tool_output.retrieval_mode,
                 'result_count': len(tool_output.items),
                 'retry_count': state.get('retry_count', 0),
+            },
+        )
+
+        logger.info(
+            {
+                'event': 'ai.tool.search_items_completed',
+                'request_id': state['request_id'],
+                'run_id': state['run_id'],
+                'thread_id': state['thread_id'],
+                'output_shape': {
+                    'result_count': len(tool_output.items),
+                    'total_matches': tool_output.total_matches,
+                    'retrieval_mode': tool_output.retrieval_mode,
+                },
             },
         )
 
@@ -316,7 +492,9 @@ class AssistantGraphWorkflow:
             'validation_error': None,
         }
 
+    @traceable(run_type='chain', name='ai.graph.validate_tool_output_node')
     def _validate_tool_output_node(self, state: AssistantGraphState) -> AssistantGraphState:
+        _log_node_entered(state, node='validate_tool_output')
         if state.get('validation_error'):
             return {}
 
@@ -328,6 +506,15 @@ class AssistantGraphWorkflow:
             ]
             recommended_ids = [item.product.product_id for item in validated_output.items]
         except ValidationError as exc:
+            logger.warning(
+                {
+                    'event': 'ai.tool.search_items_failed',
+                    'request_id': state['request_id'],
+                    'run_id': state['run_id'],
+                    'thread_id': state['thread_id'],
+                    'failure_reason': 'output_validation',
+                },
+            )
             return {
                 'validation_error': f'search_items output validation failed: {exc.errors()}',
                 'retrieved_products': [],
@@ -340,13 +527,16 @@ class AssistantGraphWorkflow:
             'terminal_status': 'success' if recommended_ids else 'no_results',
         }
 
+    @traceable(run_type='chain', name='ai.graph.retry_route_node')
     def _retry_route_node(self, state: AssistantGraphState) -> AssistantGraphState:
+        _log_node_entered(state, node='retry_route')
         next_retry_count = state.get('retry_count', 0) + 1
 
         logger.warning(
             {
                 'event': 'ai.graph.retry_route',
                 'request_id': state['request_id'],
+                'run_id': state['run_id'],
                 'thread_id': state['thread_id'],
                 'retry_count': next_retry_count,
                 'validation_error': state.get('validation_error'),
@@ -358,8 +548,20 @@ class AssistantGraphWorkflow:
             'validation_error': None,
         }
 
+    @traceable(run_type='chain', name='ai.graph.no_result_node')
     def _no_result_node(self, state: AssistantGraphState) -> AssistantGraphState:
+        _log_node_entered(state, node='no_result')
         status = 'retry_exhausted' if state.get('validation_error') else 'no_results'
+
+        logger.info(
+            {
+                'event': 'ai.graph.no_result',
+                'request_id': state['request_id'],
+                'run_id': state['run_id'],
+                'thread_id': state['thread_id'],
+                'terminal_status': status,
+            },
+        )
 
         return {
             'terminal_status': status,
@@ -376,16 +578,50 @@ class AssistantGraphWorkflow:
             'comparison_summary': None,
         }
 
+    @traceable(run_type='chain', name='ai.graph.final_response_node')
     def _final_response_node(self, state: AssistantGraphState) -> AssistantGraphState:
+        _log_node_entered(state, node='final_response')
         retrieved_products = list(state.get('retrieved_products', []))
         recommended_ids = list(state.get('recommended_product_ids', []))
 
         if len(retrieved_products) == 0 and recommended_ids:
             hydrated_products: list[dict[str, Any]] = []
             for index, product_id in enumerate(recommended_ids[:4]):
-                details = self._tools.get_item_details(
-                    GetItemDetailsToolInput(product_id=product_id)
+                logger.info(
+                    {
+                        'event': 'ai.tool.get_item_details_started',
+                        'request_id': state['request_id'],
+                        'run_id': state['run_id'],
+                        'thread_id': state['thread_id'],
+                        'input_shape': {'product_id_length': len(product_id)},
+                    },
                 )
+                try:
+                    details = self._tools.get_item_details(
+                        GetItemDetailsToolInput(product_id=product_id)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        {
+                            'event': 'ai.tool.get_item_details_failed',
+                            'request_id': state['request_id'],
+                            'run_id': state['run_id'],
+                            'thread_id': state['thread_id'],
+                            'failure_reason': type(exc).__name__,
+                        },
+                    )
+                    continue
+
+                logger.info(
+                    {
+                        'event': 'ai.tool.get_item_details_completed',
+                        'request_id': state['request_id'],
+                        'run_id': state['run_id'],
+                        'thread_id': state['thread_id'],
+                        'output_shape': {'item_found': details.item is not None},
+                    },
+                )
+
                 if details.item is None:
                     continue
                 hydrated_products.append(
@@ -405,12 +641,41 @@ class AssistantGraphWorkflow:
 
         comparison_summary: str | None = None
         if state.get('comparison_requested') and recommended_ids:
-            compare_output = self._tools.compare_items(
-                CompareItemsToolInput(
-                    product_ids=recommended_ids[:4],
-                )
+            logger.info(
+                {
+                    'event': 'ai.tool.compare_items_started',
+                    'request_id': state['request_id'],
+                    'run_id': state['run_id'],
+                    'thread_id': state['thread_id'],
+                    'input_shape': {'product_count': min(4, len(recommended_ids))},
+                },
             )
-            comparison_summary = compare_output.summary
+            try:
+                compare_output = self._tools.compare_items(
+                    CompareItemsToolInput(
+                        product_ids=recommended_ids[:4],
+                    )
+                )
+                comparison_summary = compare_output.summary
+                logger.info(
+                    {
+                        'event': 'ai.tool.compare_items_completed',
+                        'request_id': state['request_id'],
+                        'run_id': state['run_id'],
+                        'thread_id': state['thread_id'],
+                        'output_shape': {'summary_length': len(compare_output.summary.strip())},
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    {
+                        'event': 'ai.tool.compare_items_failed',
+                        'request_id': state['request_id'],
+                        'run_id': state['run_id'],
+                        'thread_id': state['thread_id'],
+                        'failure_reason': type(exc).__name__,
+                    },
+                )
 
         assistant_message = (
             f"I found {len(retrieved_products)} matching products using "
@@ -422,17 +687,27 @@ class AssistantGraphWorkflow:
             'Should I focus on in-stock items only?',
         ]
 
+        llm_provider = self._synthesizer.provider
+        llm_model = self._synthesizer.model_name
+        token_usage_prompt: int | None = None
+        token_usage_completion: int | None = None
+        token_usage_total: int | None = None
+        cost_estimate_usd: float | None = None
+        fallback_reason: str | None = None
+
         if not self._synthesizer.enabled:
+            fallback_reason = 'disabled'
             logger.info(
                 {
                     'event': 'ai.llm_synthesis_fallback',
                     'request_id': state['request_id'],
+                    'run_id': state['run_id'],
                     'thread_id': state['thread_id'],
                     'ai_retrieval_mode': state.get('retrieval_mode'),
-                    'llm_provider': self._synthesizer.provider,
-                    'llm_model': self._model_name,
+                    'llm_provider': llm_provider,
+                    'llm_model': llm_model,
                     'latency_ms': 0,
-                    'fallback_reason': 'disabled',
+                    'fallback_reason': fallback_reason,
                 },
             )
         else:
@@ -441,10 +716,13 @@ class AssistantGraphWorkflow:
                 {
                     'event': 'ai.llm_synthesis_started',
                     'request_id': state['request_id'],
+                    'run_id': state['run_id'],
                     'thread_id': state['thread_id'],
                     'ai_retrieval_mode': state.get('retrieval_mode'),
-                    'llm_provider': self._synthesizer.provider,
-                    'llm_model': self._model_name,
+                    'llm_provider': llm_provider,
+                    'llm_model': llm_model,
+                    'budget_top_n_products': state.get('budget_top_n_products'),
+                    'budget_max_output_tokens': state.get('budget_max_output_tokens'),
                 },
             )
 
@@ -457,17 +735,29 @@ class AssistantGraphWorkflow:
                     comparison_summary=comparison_summary,
                 )
                 assistant_message = synthesis.assistant_message
+                token_usage_prompt = synthesis.prompt_tokens
+                token_usage_completion = synthesis.completion_tokens
+                token_usage_total = synthesis.total_tokens
+                cost_estimate_usd = estimate_request_cost_usd(
+                    provider=llm_provider,
+                    model=llm_model,
+                    prompt_tokens=token_usage_prompt,
+                    completion_tokens=token_usage_completion,
+                    total_tokens=token_usage_total,
+                )
                 if synthesis.follow_up_prompts:
                     follow_up_prompts = synthesis.follow_up_prompts
                 if state.get('comparison_requested') and synthesis.comparison_summary:
                     comparison_summary = synthesis.comparison_summary
             except Exception as exc:
+                fallback_reason = type(exc).__name__
                 capture_sentry_exception(
                     exc,
                     tags={
                         'ai_component': 'llm_synthesis',
-                        'llm_provider': self._synthesizer.provider,
+                        'llm_provider': llm_provider,
                         'request_id': state['request_id'],
+                        'run_id': state['run_id'],
                         'thread_id': state['thread_id'],
                         'ai_retrieval_mode': str(state.get('retrieval_mode')),
                     },
@@ -476,12 +766,13 @@ class AssistantGraphWorkflow:
                     {
                         'event': 'ai.llm_synthesis_fallback',
                         'request_id': state['request_id'],
+                        'run_id': state['run_id'],
                         'thread_id': state['thread_id'],
                         'ai_retrieval_mode': state.get('retrieval_mode'),
-                        'llm_provider': self._synthesizer.provider,
-                        'llm_model': self._model_name,
+                        'llm_provider': llm_provider,
+                        'llm_model': llm_model,
                         'latency_ms': int((perf_counter() - started_at) * 1000),
-                        'fallback_reason': type(exc).__name__,
+                        'fallback_reason': fallback_reason,
                     },
                 )
             else:
@@ -489,13 +780,29 @@ class AssistantGraphWorkflow:
                     {
                         'event': 'ai.llm_synthesis_completed',
                         'request_id': state['request_id'],
+                        'run_id': state['run_id'],
                         'thread_id': state['thread_id'],
                         'ai_retrieval_mode': state.get('retrieval_mode'),
-                        'llm_provider': self._synthesizer.provider,
-                        'llm_model': self._model_name,
+                        'llm_provider': llm_provider,
+                        'llm_model': llm_model,
                         'latency_ms': int((perf_counter() - started_at) * 1000),
+                        'token_usage_prompt': token_usage_prompt,
+                        'token_usage_completion': token_usage_completion,
+                        'token_usage_total': token_usage_total,
+                        'cost_estimate_usd': cost_estimate_usd,
                     },
                 )
+
+        logger.info(
+            {
+                'event': 'ai.graph.final_response_ready',
+                'request_id': state['request_id'],
+                'run_id': state['run_id'],
+                'thread_id': state['thread_id'],
+                'result_count': len(recommended_ids),
+                'fallback_reason': fallback_reason,
+            },
+        )
 
         return {
             'terminal_status': 'success',
@@ -504,13 +811,20 @@ class AssistantGraphWorkflow:
             'retrieved_products': retrieved_products,
             'recommended_product_ids': recommended_ids,
             'comparison_summary': comparison_summary,
+            'llm_provider': llm_provider,
+            'llm_model': llm_model,
+            'token_usage_prompt': token_usage_prompt,
+            'token_usage_completion': token_usage_completion,
+            'token_usage_total': token_usage_total,
+            'cost_estimate_usd': cost_estimate_usd,
+            'fallback_reason': fallback_reason,
         }
 
 
 def _route_after_planning(state: AssistantGraphState) -> Literal['product_retrieval', 'final_response']:
-    if state.get('skip_retrieval', False):
-        return 'final_response'
-    return 'product_retrieval'
+    selected = 'final_response' if state.get('skip_retrieval', False) else 'product_retrieval'
+    _log_route_decision(state, route_name='after_planning', selected=selected)
+    return selected
 
 
 def _derive_retrieval_mode(
@@ -531,15 +845,19 @@ def _derive_retrieval_mode(
 
 
 def _route_after_validation(state: AssistantGraphState) -> Literal['retry_route', 'no_result', 'final_response']:
+    selected: Literal['retry_route', 'no_result', 'final_response']
     if state.get('validation_error') is not None:
         if state.get('retry_count', 0) < _RETRY_LIMIT:
-            return 'retry_route'
-        return 'no_result'
+            selected = 'retry_route'
+        else:
+            selected = 'no_result'
+    elif len(state.get('recommended_product_ids', [])) == 0:
+        selected = 'no_result'
+    else:
+        selected = 'final_response'
 
-    if len(state.get('recommended_product_ids', [])) == 0:
-        return 'no_result'
-
-    return 'final_response'
+    _log_route_decision(state, route_name='after_validation', selected=selected)
+    return selected
 
 
 def _compile_graph(workflow: AssistantGraphWorkflow):
@@ -565,6 +883,43 @@ def _compile_graph(workflow: AssistantGraphWorkflow):
 
 def _build_thread_id(*, user_id: str, session_id: str) -> str:
     return f'{user_id}:{session_id}'
+
+
+def _clamp_int(value: int, *, min_value: int, max_value: int) -> int:
+    return max(min_value, min(max_value, value))
+
+
+def _log_node_entered(state: AssistantGraphState, *, node: str) -> None:
+    logger.info(
+        {
+            'event': 'ai.graph.node_entered',
+            'node': node,
+            'request_id': state.get('request_id'),
+            'run_id': state.get('run_id'),
+            'thread_id': state.get('thread_id'),
+            'retry_count': state.get('retry_count', 0),
+        },
+    )
+
+
+def _log_route_decision(
+    state: AssistantGraphState,
+    *,
+    route_name: str,
+    selected: str,
+) -> None:
+    logger.info(
+        {
+            'event': 'ai.graph.route_selected',
+            'route_name': route_name,
+            'selected': selected,
+            'request_id': state.get('request_id'),
+            'run_id': state.get('run_id'),
+            'thread_id': state.get('thread_id'),
+            'retry_count': state.get('retry_count', 0),
+            'validation_error_present': state.get('validation_error') is not None,
+        },
+    )
 
 
 def _build_recommendation_from_state(state: AssistantGraphState) -> FinalRecommendation:

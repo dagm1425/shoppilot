@@ -68,6 +68,9 @@ class _StubSynthesizer:
     ) -> None:
         self.provider = provider
         self.enabled = enabled
+        self.model_name = 'gemini-2.5-flash'
+        self.max_tokens = 220
+        self.top_n_products = 3
         self.result = result
         self.should_raise = should_raise
         self.calls: list[dict[str, object]] = []
