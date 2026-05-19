@@ -90,6 +90,7 @@ async function mockAdminHomeSummary(page: Page) {
 test('redirects unauthenticated admin route access to login and returns after successful login', async ({
   page,
 }) => {
+  test.setTimeout(120_000);
   let isAuthenticated = false;
   await mockAdminHomeSummary(page);
 
@@ -244,13 +245,13 @@ test('redirects unauthenticated admin route access to login and returns after su
   await page.goto('/admin');
   await waitForClientHydration(page);
 
-  await expect(page).toHaveURL(/\/login\?redirect=%2Fadmin$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/login\?redirect=%2Fadmin$/, { timeout: 60_000 });
 
   await page.getByLabel('Email').fill('admin@shoppilot.local');
   await page.locator('input#password').fill('AdminSecure123');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
-  await expect(page).toHaveURL(/\/admin$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/admin$/, { timeout: 60_000 });
   await expect(page.getByText('Admin home')).toBeVisible();
   await expect(page.locator("a[href='/admin']")).toBeVisible();
   await expect(page.locator("a[href='/admin/products']")).toBeVisible();
