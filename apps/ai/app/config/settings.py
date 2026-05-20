@@ -29,7 +29,7 @@ class AppSettings(BaseSettings):
         )
     )
     llm_synthesis_base_url: AnyHttpUrl = Field(
-        default='https://generativelanguage.googleapis.com/v1beta',
+        default='https://generativelanguage.googleapis.com',
         validation_alias=AliasChoices(
             'LLM_SYNTHESIS_BASE_URL',
             'GEMINI_BASE_URL',
@@ -48,7 +48,7 @@ class AppSettings(BaseSettings):
     embedding_provider: str = Field(default='gemini', min_length=1, validation_alias='EMBEDDING_PROVIDER')
     embedding_api_key: SecretStr = Field(validation_alias='GEMINI_API_KEY')
     embedding_base_url: AnyHttpUrl = Field(
-        default='https://generativelanguage.googleapis.com/v1beta',
+        default='https://generativelanguage.googleapis.com',
         validation_alias=AliasChoices('EMBEDDING_BASE_URL', 'GEMINI_BASE_URL'),
     )
     embedding_model: str = Field(
@@ -83,13 +83,13 @@ class AppSettings(BaseSettings):
         validation_alias='AI_QUERY_PLANNER_TIMEOUT_MS',
     )
     ai_llm_synthesis_timeout_ms: int = Field(
-        default=8000,
+        default=18000,
         ge=1000,
         le=30000,
         validation_alias='AI_LLM_SYNTHESIS_TIMEOUT_MS',
     )
     ai_llm_synthesis_max_tokens: int = Field(
-        default=220,
+        default=800,
         ge=64,
         le=800,
         validation_alias='AI_LLM_SYNTHESIS_MAX_TOKENS',
@@ -101,7 +101,7 @@ class AppSettings(BaseSettings):
         validation_alias='AI_LLM_SYNTHESIS_TEMPERATURE',
     )
     ai_llm_synthesis_top_n_products: int = Field(
-        default=3,
+        default=5,
         ge=1,
         le=5,
         validation_alias='AI_LLM_SYNTHESIS_TOP_N_PRODUCTS',
@@ -121,8 +121,11 @@ class AppSettings(BaseSettings):
 
     langchain_tracing_v2: bool = Field(default=False, validation_alias='LANGCHAIN_TRACING_V2')
     langchain_api_key: SecretStr | None = Field(default=None, validation_alias='LANGCHAIN_API_KEY')
-    langchain_project: str | None = Field(default=None, validation_alias='LANGCHAIN_PROJECT')
-    langchain_endpoint: AnyHttpUrl | None = Field(default=None, validation_alias='LANGCHAIN_ENDPOINT')
+    langchain_project: str | None = Field(default='Shoppilot', validation_alias='LANGCHAIN_PROJECT')
+    langchain_endpoint: AnyHttpUrl | None = Field(
+        default='https://eu.api.smith.langchain.com',
+        validation_alias='LANGCHAIN_ENDPOINT',
+    )
     node_env: str = Field(default='development', validation_alias='NODE_ENV')
     sentry_enabled: bool = Field(default=False, validation_alias='SENTRY_ENABLED')
     sentry_dsn: str | None = Field(default=None, validation_alias='SENTRY_DSN')
