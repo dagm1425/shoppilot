@@ -56,6 +56,8 @@ class ProductVectorStore:
             {
                 'product_id': product.product_id,
                 'category': product.category,
+                'gender': product.gender,
+                'thermal_profile': product.thermal_profile,
                 'price': product.price_cents,
                 'availability': product.available,
                 'rating': product.rating,

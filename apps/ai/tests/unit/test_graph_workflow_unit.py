@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.graph.workflow import AssistantGraphWorkflow
+from app.llm.planner import QueryPlannerOutput
 from app.llm.synthesizer import AssistantSynthesisResult
 from app.schemas import (
     ChatRequest,
@@ -97,6 +98,60 @@ class _StubSynthesizer:
             raise RuntimeError('synthetic synthesis failure')
         if self.result is None:
             raise RuntimeError('stub synthesis result missing')
+        return self.result
+
+
+class _StubPlanner:
+    def __init__(
+        self,
+        *,
+        enabled: bool = True,
+        result: QueryPlannerOutput | list[QueryPlannerOutput] | None = None,
+        should_raise: bool = False,
+    ) -> None:
+        self.enabled = enabled
+        self.result = result
+        self.should_raise = should_raise
+        self.calls: list[dict[str, object]] = []
+        self.last_run_metrics: dict[str, bool] = {
+            'updater_attempted': False,
+            'updater_pass': False,
+            'planner_pass': False,
+        }
+
+    def plan(
+        self,
+        *,
+        query: str,
+        prior_filters: dict[str, object],
+        prior_semantic_query: str,
+        prior_comparison_requested: bool,
+        prior_reset_requested: bool,
+        has_prior_recommendations: bool,
+    ) -> QueryPlannerOutput:
+        self.last_run_metrics = {
+            'updater_attempted': bool(prior_filters) or bool(prior_semantic_query.strip()),
+            'updater_pass': not self.should_raise,
+            'planner_pass': not self.should_raise,
+        }
+        self.calls.append(
+            {
+                'query': query,
+                'prior_filters': prior_filters,
+                'prior_semantic_query': prior_semantic_query,
+                'prior_comparison_requested': prior_comparison_requested,
+                'prior_reset_requested': prior_reset_requested,
+                'has_prior_recommendations': has_prior_recommendations,
+            }
+        )
+        if self.should_raise:
+            raise RuntimeError('synthetic planner failure')
+        if self.result is None:
+            raise RuntimeError('stub planner result missing')
+        if isinstance(self.result, list):
+            if len(self.result) == 0:
+                raise RuntimeError('stub planner result sequence exhausted')
+            return self.result.pop(0)
         return self.result
 
 
@@ -621,3 +676,279 @@ def test_workflow_third_turn_uses_latest_state_not_first_turn_state() -> None:
     assert third_call_payload.price_min_cents == 5000
     assert third_call_payload.price_max_cents is None
     assert third_call_payload.availability is True
+
+
+def test_workflow_uses_query_planner_plan_when_valid() -> None:
+    first = _product(
+        product_id='thermal-fleece-sweater',
+        name='Thermal Fleece Sweater',
+        category='tops',
+        price_cents=6800,
+    )
+    tools = _StubTools(
+        search_plan=[
+            _search_output(
+                retrieval_mode='structured',
+                items=[first],
+                semantic_query='',
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    gender='men',
+                    price_max_cents=8000,
+                    availability=True,
+                ),
+            )
+        ],
+        product_map={first.product_id: first},
+    )
+    planner = _StubPlanner(
+        result=QueryPlannerOutput.model_validate(
+            {
+                'retrievalMode': 'structured',
+                'filters': {
+                    'category': 'tops',
+                    'gender': 'men',
+                    'priceMaxCents': 8000,
+                    'availability': True,
+                },
+                'semanticQuery': '',
+                'resetRequested': False,
+                'clearFields': [],
+                'comparisonRequested': False,
+            }
+        )
+    )
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        query_planner=planner,
+        model_name='gpt-4.1-mini',
+    )
+
+    response = workflow.run(
+        _chat_payload(
+            message='show in-stock tops for men under 80',
+            session_id='session-planner-1',
+            request_id='request-planner-1',
+            user_id='user-1',
+        )
+    )
+
+    assert response.recommended_product_ids == ['thermal-fleece-sweater']
+    assert len(planner.calls) == 1
+    assert tools.search_inputs[0].gender == 'men'
+    assert tools.search_inputs[0].retrieval_mode == 'structured'
+
+
+def test_workflow_falls_back_to_deterministic_planning_when_query_planner_fails() -> None:
+    first = _product(
+        product_id='essential-cropped-tee',
+        name='Essential Cropped Tee',
+        category='tops',
+        price_cents=2400,
+    )
+    tools = _StubTools(
+        search_plan=[_search_output(retrieval_mode='structured', items=[first])],
+        product_map={first.product_id: first},
+    )
+    planner = _StubPlanner(should_raise=True)
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        query_planner=planner,
+        model_name='gpt-4.1-mini',
+    )
+
+    response = workflow.run(
+        _chat_payload(
+            message='show in-stock tops under 50',
+            session_id='session-planner-fallback',
+            request_id='request-planner-fallback',
+            user_id='user-1',
+        )
+    )
+
+    assert response.recommended_product_ids == ['essential-cropped-tee']
+    assert len(planner.calls) == 1
+    assert tools.search_calls == 1
+
+
+def test_workflow_planner_path_does_not_append_residual_semantic_text() -> None:
+    first = _product(
+        product_id='flow-sports-bra',
+        name='Flow Sports Bra',
+        category='tops',
+        price_cents=3600,
+    )
+    second = _product(
+        product_id='thermal-fleece-sweater',
+        name='Thermal Fleece Sweater',
+        category='tops',
+        price_cents=6800,
+    )
+    tools = _StubTools(
+        search_plan=[
+            _search_output(retrieval_mode='hybrid', items=[first], semantic_query='hot weather tops'),
+            _search_output(retrieval_mode='hybrid', items=[second], semantic_query='cold weather tops'),
+        ],
+        product_map={
+            first.product_id: first,
+            second.product_id: second,
+        },
+    )
+    planner = _StubPlanner(
+        result=[
+            QueryPlannerOutput.model_validate(
+                {
+                    'retrievalMode': 'hybrid',
+                    'filters': {'category': 'tops', 'gender': 'women', 'thermalProfile': 'hot_weather'},
+                    'semanticQuery': 'hot weather tops',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': False,
+                }
+            ),
+            QueryPlannerOutput.model_validate(
+                {
+                    'retrievalMode': 'hybrid',
+                    'filters': {'category': 'tops', 'gender': 'women', 'thermalProfile': 'cold_weather'},
+                    'semanticQuery': 'cold weather tops',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': False,
+                }
+            ),
+        ],
+    )
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        query_planner=planner,
+        model_name='gpt-4.1-mini',
+    )
+
+    workflow.run(
+        _chat_payload(
+            message='show tops for women for hot weather workouts',
+            session_id='session-updater-carry',
+            request_id='request-updater-carry-1',
+            user_id='user-1',
+        )
+    )
+    workflow.run(
+        _chat_payload(
+            message='now make those for cold weather',
+            session_id='session-updater-carry',
+            request_id='request-updater-carry-2',
+            user_id='user-1',
+        )
+    )
+
+    assert len(planner.calls) == 2
+    assert planner.calls[1]['prior_semantic_query'] == 'hot weather tops'
+    assert tools.search_inputs[1].query == 'cold weather tops'
+
+
+def test_workflow_planner_path_inherits_availability_when_not_explicitly_changed() -> None:
+    first = _product(
+        product_id='airflow-performance-tee-men',
+        name='Airflow Performance Tee',
+        category='tops',
+        price_cents=3500,
+    )
+    second = _product(
+        product_id='lift-seamless-tee',
+        name='Lift Seamless Tee',
+        category='tops',
+        price_cents=3200,
+    )
+    tools = _StubTools(
+        search_plan=[
+            _search_output(
+                retrieval_mode='structured',
+                items=[first],
+                semantic_query='',
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    gender='men',
+                    availability=True,
+                    price_max_cents=8000,
+                ),
+            ),
+            _search_output(
+                retrieval_mode='structured',
+                items=[second],
+                semantic_query='',
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    gender='men',
+                    availability=True,
+                    price_max_cents=3500,
+                ),
+            ),
+        ],
+        product_map={
+            first.product_id: first,
+            second.product_id: second,
+        },
+    )
+    planner = _StubPlanner(
+        result=[
+            QueryPlannerOutput.model_validate(
+                {
+                    'retrievalMode': 'structured',
+                    'filters': {
+                        'category': 'tops',
+                        'gender': 'men',
+                        'availability': True,
+                        'priceMaxCents': 8000,
+                    },
+                    'semanticQuery': '',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': False,
+                }
+            ),
+            QueryPlannerOutput.model_validate(
+                {
+                    'retrievalMode': 'structured',
+                    'filters': {
+                        'category': 'tops',
+                        'gender': 'men',
+                        'availability': None,
+                        'priceMaxCents': 3500,
+                    },
+                    'semanticQuery': '',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': False,
+                }
+            ),
+        ],
+    )
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_StubSynthesizer(enabled=False),
+        query_planner=planner,
+        model_name='gpt-4.1-mini',
+    )
+
+    workflow.run(
+        _chat_payload(
+            message='show in-stock tops for men under 80',
+            session_id='session-availability-carry',
+            request_id='request-availability-carry-1',
+            user_id='user-1',
+        )
+    )
+    workflow.run(
+        _chat_payload(
+            message='under 35 dollars',
+            session_id='session-availability-carry',
+            request_id='request-availability-carry-2',
+            user_id='user-1',
+        )
+    )
+
+    assert len(tools.search_inputs) == 2
+    assert tools.search_inputs[1].availability is True

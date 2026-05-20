@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm test:unit && pnpm test:int && pnpm test:e2e",
     "test:unit": "jest --config jest.config.ts --selectProjects unit",
-    "test:int": "jest --config jest.config.ts --selectProjects integration",
+    "test:int": "STRIPE_WEBHOOK_SECRET=whsec_test_int jest --config jest.config.ts --selectProjects integration --runInBand",
     "test:int:db": "SKIP_DB_CONNECT=false jest --config jest.config.ts --selectProjects integration",
     "test:e2e": "jest --config jest.config.ts --selectProjects e2e"
   },

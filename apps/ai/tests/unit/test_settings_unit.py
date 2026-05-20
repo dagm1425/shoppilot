@@ -74,6 +74,8 @@ def test_settings_apply_llm_synthesis_defaults(monkeypatch: pytest.MonkeyPatch) 
     assert str(settings.llm_synthesis_base_url) == 'https://generativelanguage.googleapis.com/v1beta'
     assert settings.llm_synthesis_model == 'gemini-2.5-flash'
     assert settings.ai_llm_synthesis_enabled is True
+    assert settings.ai_query_planner_enabled is True
+    assert settings.ai_query_planner_timeout_ms == 10000
     assert settings.ai_llm_synthesis_timeout_ms == 8000
     assert settings.ai_llm_synthesis_max_tokens == 220
     assert settings.ai_llm_synthesis_temperature == 0.2
@@ -85,6 +87,7 @@ def test_settings_apply_llm_synthesis_defaults(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.parametrize(
     ('field', 'value'),
     [
+        ('AI_QUERY_PLANNER_TIMEOUT_MS', '500'),
         ('AI_LLM_SYNTHESIS_TIMEOUT_MS', '500'),
         ('AI_LLM_SYNTHESIS_MAX_TOKENS', '999'),
         ('AI_LLM_SYNTHESIS_TEMPERATURE', '1.5'),

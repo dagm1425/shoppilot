@@ -91,6 +91,7 @@ model Product {
   description       String
   category          ProductCategory
   gender            ProductGender
+  thermalProfile    ProductThermalProfile @default(ALL_SEASON)
   fit               String
   color             String
   priceCents        Int
@@ -108,6 +109,7 @@ model Product {
 
   @@index([category, createdAt], map: "products_category_created_at_idx")
   @@index([gender, category, createdAt], map: "products_gender_category_created_at_idx")
+  @@index([thermalProfile, category, createdAt], map: "products_thermal_category_created_at_idx")
   @@index([name], map: "products_name_idx")
   @@map("products")
 }
@@ -343,6 +345,12 @@ enum ProductCategory {
 enum ProductGender {
   MEN
   WOMEN
+}
+
+enum ProductThermalProfile {
+  HOT_WEATHER
+  COLD_WEATHER
+  ALL_SEASON
 }
 
 enum ProductSize {

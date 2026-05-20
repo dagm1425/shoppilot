@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.graph.workflow import AssistantGraphWorkflow
+from app.llm.planner import QueryPlannerOutput
 from app.schemas import ChatRequest, ChatResponse, FinalRecommendation, ProductItem
 from app.schemas import (
     CompareItemsToolOutput,
@@ -40,6 +41,38 @@ class _NoopSynthesizer:
         raise RuntimeError('disabled')
 
 
+class _StubPlanner:
+    enabled = True
+
+    def __init__(self, outcomes: list[QueryPlannerOutput]) -> None:
+        self.outcomes = list(outcomes)
+        self.calls: list[dict[str, object]] = []
+
+    def plan(  # noqa: PLR0913
+        self,
+        *,
+        query: str,
+        prior_filters: dict[str, object],
+        prior_semantic_query: str,
+        prior_comparison_requested: bool,
+        prior_reset_requested: bool,
+        has_prior_recommendations: bool,
+    ) -> QueryPlannerOutput:
+        self.calls.append(
+            {
+                'query': query,
+                'prior_filters': prior_filters,
+                'prior_semantic_query': prior_semantic_query,
+                'prior_comparison_requested': prior_comparison_requested,
+                'prior_reset_requested': prior_reset_requested,
+                'has_prior_recommendations': has_prior_recommendations,
+            }
+        )
+        if len(self.outcomes) == 0:
+            raise RuntimeError('planner outcomes exhausted')
+        return self.outcomes.pop(0)
+
+
 class _WorkflowTools:
     def __init__(self) -> None:
         self.search_calls = 0
@@ -65,6 +98,16 @@ class _WorkflowTools:
             rating=4.6,
             short_description='Premium performance tank',
         )
+        self._product_c = ProductItem(
+            product_id='thermal-fleece-sweater',
+            name='Thermal Fleece Sweater',
+            category='tops',
+            price_cents=6800,
+            currency='USD',
+            available=True,
+            rating=4.7,
+            short_description='Insulated cold-weather sweater',
+        )
 
     def search_items(self, payload):
         self.search_calls += 1
@@ -84,16 +127,32 @@ class _WorkflowTools:
                 total_matches=1,
             )
 
+        if self.search_calls == 2:
+            return SearchItemsToolOutput(
+                retrieval_mode='hybrid',
+                semantic_query='for men premium',
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    price_min_cents=5000,
+                    availability=True,
+                    min_rating=4.0,
+                ),
+                items=[SearchResult(product=self._product_b, similarity_score=0.93)],
+                total_matches=1,
+            )
+
         return SearchItemsToolOutput(
             retrieval_mode='hybrid',
-            semantic_query='for men premium',
+            semantic_query='cold weather men tops',
             normalized_filters=NormalizedFilters(
                 category='tops',
+                gender='men',
+                thermal_profile='cold_weather',
                 price_min_cents=5000,
                 availability=True,
                 min_rating=4.0,
             ),
-            items=[SearchResult(product=self._product_b, similarity_score=0.93)],
+            items=[SearchResult(product=self._product_c, similarity_score=0.94)],
             total_matches=1,
         )
 
@@ -102,6 +161,8 @@ class _WorkflowTools:
             return GetItemDetailsToolOutput(item=self._product_a)
         if payload.product_id == self._product_b.product_id:
             return GetItemDetailsToolOutput(item=self._product_b)
+        if payload.product_id == self._product_c.product_id:
+            return GetItemDetailsToolOutput(item=self._product_c)
         return GetItemDetailsToolOutput(item=None)
 
     def compare_items(self, payload) -> CompareItemsToolOutput:
@@ -317,6 +378,115 @@ def test_chat_follow_up_refinement_in_same_session_updates_recommendations(
     second_call_input = tools.search_inputs[1]
     assert second_call_input.price_min_cents == 5000
     assert second_call_input.price_max_cents is None
+
+
+def test_chat_three_turn_follow_up_uses_updater_state_and_replaces_semantic_intent(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = _WorkflowTools()
+    planner = _StubPlanner(
+        outcomes=[
+            QueryPlannerOutput.model_validate(
+                {
+                    'retrievalMode': 'structured',
+                    'filters': {
+                        'category': 'tops',
+                        'gender': 'men',
+                        'priceMaxCents': 8000,
+                        'availability': True,
+                        'minRating': 4.0,
+                    },
+                    'semanticQuery': '',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': False,
+                }
+            ),
+            QueryPlannerOutput.model_validate(
+                {
+                    'retrievalMode': 'hybrid',
+                    'filters': {
+                        'category': 'tops',
+                        'gender': 'men',
+                        'priceMinCents': 5000,
+                        'priceMaxCents': None,
+                        'availability': True,
+                        'minRating': 4.0,
+                    },
+                    'semanticQuery': 'premium men tops',
+                    'resetRequested': False,
+                    'clearFields': ['priceMaxCents'],
+                    'comparisonRequested': False,
+                }
+            ),
+            QueryPlannerOutput.model_validate(
+                {
+                    'retrievalMode': 'hybrid',
+                    'filters': {
+                        'category': 'tops',
+                        'gender': 'men',
+                        'thermalProfile': 'cold_weather',
+                        'priceMinCents': 5000,
+                        'availability': True,
+                        'minRating': 4.0,
+                    },
+                    'semanticQuery': 'cold weather men tops',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': False,
+                }
+            ),
+        ],
+    )
+    workflow = AssistantGraphWorkflow(
+        tools=tools,
+        synthesizer=_NoopSynthesizer(),
+        query_planner=planner,
+        model_name='gemini-2.5-flash',
+    )
+    monkeypatch.setattr('app.services.chat_service.get_assistant_workflow', lambda: workflow)
+
+    turn_one = client.post(
+        '/ai/chat',
+        json={
+            'message': 'Show me in-stock tops under $80 with rating at least 4 for men.',
+            'sessionId': 'session-follow-up-3turn',
+            'userContext': {'userId': 'user-1'},
+            'requestId': 'request-follow-up-3turn-1',
+        },
+    )
+    turn_two = client.post(
+        '/ai/chat',
+        json={
+            'message': 'Make those premium.',
+            'sessionId': 'session-follow-up-3turn',
+            'userContext': {'userId': 'user-1'},
+            'requestId': 'request-follow-up-3turn-2',
+        },
+    )
+    turn_three = client.post(
+        '/ai/chat',
+        json={
+            'message': 'Now make those for cold weather only.',
+            'sessionId': 'session-follow-up-3turn',
+            'userContext': {'userId': 'user-1'},
+            'requestId': 'request-follow-up-3turn-3',
+        },
+    )
+
+    assert turn_one.status_code == 200
+    assert turn_two.status_code == 200
+    assert turn_three.status_code == 200
+    assert turn_one.json()['recommendedProductIds'] == ['essential-cropped-tee']
+    assert turn_two.json()['recommendedProductIds'] == ['pro-performance-tank']
+    assert turn_three.json()['recommendedProductIds'] == ['thermal-fleece-sweater']
+    assert tools.search_calls == 3
+    assert len(planner.calls) == 3
+    assert planner.calls[2]['prior_semantic_query'] == 'premium men tops'
+    third_call_input = tools.search_inputs[2]
+    assert third_call_input.thermal_profile == 'cold_weather'
+    assert third_call_input.query == 'cold weather men tops'
 
 
 def test_chat_versioned_route_returns_same_contract(

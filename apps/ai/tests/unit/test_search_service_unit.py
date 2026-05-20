@@ -31,13 +31,20 @@ def _settings_stub() -> SimpleNamespace:
     )
 
 
-def _product(product_id: str, price_cents: int, *, gender: str = 'women') -> ProductRecord:
+def _product(
+    product_id: str,
+    price_cents: int,
+    *,
+    gender: str = 'women',
+    thermal_profile: str = 'all_season',
+) -> ProductRecord:
     return ProductRecord(
         product_id=product_id,
         name=product_id.replace('-', ' ').title(),
         description=f'{product_id} description',
         category='tops',
         gender=gender,
+        thermal_profile=thermal_profile,
         fit='regular',
         color='black',
         price_cents=price_cents,
@@ -180,10 +187,10 @@ def test_retrieve_hybrid_falls_back_to_structured_when_vector_returns_no_hits(
         ],
     }
     assert result.mode == RETRIEVAL_MODE_HYBRID
-    assert captured['structured_limit'] == 3
     assert result.candidate_count == 2
-    assert [product.product_id for product in result.products] == ['product-a', 'product-b']
-    assert [hit.product_id for hit in result.hits] == ['product-a', 'product-b']
+    assert captured.get('structured_limit') is None
+    assert result.products == []
+    assert result.hits == []
 
 
 def test_retrieve_semantic_mode_applies_gender_constraint_from_semantic_query(
@@ -294,6 +301,7 @@ def test_retrieve_hybrid_with_strong_structured_filters_bypasses_semantic_thresh
     service = SemanticSearchService(_settings_stub())
     filters = RetrievalFilters(
         category='tops',
+        gender='men',
         price_max_cents=4000,
         availability=True,
         min_rating=4.0,
@@ -303,6 +311,7 @@ def test_retrieve_hybrid_with_strong_structured_filters_bypasses_semantic_thresh
     class _Repo:
         def list_product_ids(self, *, filters, limit):  # noqa: ANN001
             assert filters.category == 'tops'
+            assert filters.gender == 'men'
             assert filters.price_max_cents == 4000
             assert filters.availability is True
             assert filters.min_rating == 4.0
@@ -326,6 +335,7 @@ def test_retrieve_hybrid_with_strong_structured_filters_bypasses_semantic_thresh
                 '$and': [
                     {'product_id': {'$in': ['product-a', 'product-b']}},
                     {'category': {'$eq': 'tops'}},
+                    {'gender': {'$eq': 'men'}},
                     {'availability': {'$eq': True}},
                     {'price': {'$lte': 4000}},
                     {'rating': {'$gte': 4.0}},
@@ -425,3 +435,143 @@ def test_retrieve_hybrid_rescues_with_structured_results_when_semantic_gating_dr
     assert result.mode == RETRIEVAL_MODE_HYBRID
     assert [product.product_id for product in result.products] == ['product-a', 'product-b']
     assert [hit.product_id for hit in result.hits] == ['product-a', 'product-b']
+
+
+def test_retrieve_hybrid_precision_guard_prevents_semantic_mismatch_recommendations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = SemanticSearchService(_settings_stub())
+    filters = RetrievalFilters(category='tops', price_max_cents=3000)
+    candidates = ['arrival-oversized-tank']
+    products = [
+        ProductRecord(
+            product_id='arrival-oversized-tank',
+            name='Arrival Oversized Tank',
+            description='Breathable training tank with lightweight airflow for hot-weather gym sessions.',
+            category='tops',
+            gender='men',
+            thermal_profile='hot_weather',
+            fit='regular',
+            color='black',
+            price_cents=3000,
+            currency='USD',
+            available=True,
+            rating=4.5,
+            stock=10,
+            updated_at=datetime.now(timezone.utc),
+        ),
+    ]
+    captured: dict[str, object] = {}
+
+    class _Repo:
+        def list_product_ids(self, *, filters, limit):  # noqa: ANN001
+            assert filters.category == 'tops'
+            assert filters.price_max_cents == 3000
+            assert limit == 100
+            return candidates
+
+        def get_products_by_ids(self, ids):  # noqa: ANN001
+            assert ids == ['arrival-oversized-tank']
+            return products
+
+        def list_products(self, *, filters, limit):  # noqa: ANN001
+            captured['structured_fallback_called'] = True
+            return products
+
+    class _Embeddings:
+        def embed_text(self, text: str) -> list[float]:
+            assert text == 'for men budget friendly warm'
+            return [0.12, 0.34, 0.56]
+
+    class _Vector:
+        def query(self, *, query_embedding, top_k, where):  # noqa: ANN001
+            assert query_embedding == [0.12, 0.34, 0.56]
+            assert top_k == 3
+            assert where == {
+                '$and': [
+                    {'product_id': {'$in': ['arrival-oversized-tank']}},
+                    {'category': {'$eq': 'tops'}},
+                    {'price': {'$lte': 3000}},
+                ],
+            }
+            return [SearchHit(product_id='arrival-oversized-tank', similarity_score=0.82)]
+
+    service._repository = _Repo()  # type: ignore[assignment]
+    service._embedding_client = _Embeddings()  # type: ignore[assignment]
+    service._vector_store = _Vector()  # type: ignore[assignment]
+    monkeypatch.setattr(
+        'app.search.service.parse_intent',
+        lambda _: ParsedIntent(
+            mode=RETRIEVAL_MODE_HYBRID,
+            semantic_query='for men budget friendly warm',
+            filters=filters,
+        ),
+    )
+
+    result = service.retrieve('how about budget-friendly warm options for men under $30')
+
+    assert result.mode == RETRIEVAL_MODE_HYBRID
+    assert result.candidate_count == 1
+    assert result.products == []
+    assert result.hits == []
+    assert captured.get('structured_fallback_called') is None
+
+
+def test_retrieve_hybrid_warm_intent_does_not_match_warm_weather_breathable_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = SemanticSearchService(_settings_stub())
+    filters = RetrievalFilters(category='tops', price_max_cents=4000)
+    products = [
+        ProductRecord(
+            product_id='lift-seamless-tee',
+            name='Lift Seamless Tee',
+            description='Seamless knit tee that wicks sweat and stays breathable through repeated warm-weather training cycles.',
+            category='tops',
+            gender='men',
+            thermal_profile='hot_weather',
+            fit='regular',
+            color='black',
+            price_cents=3200,
+            currency='USD',
+            available=True,
+            rating=4.5,
+            stock=10,
+            updated_at=datetime.now(timezone.utc),
+        ),
+    ]
+
+    class _Repo:
+        def list_product_ids(self, *, filters, limit):  # noqa: ANN001
+            return ['lift-seamless-tee']
+
+        def get_products_by_ids(self, ids):  # noqa: ANN001
+            assert ids == ['lift-seamless-tee']
+            return products
+
+    class _Embeddings:
+        def embed_text(self, text: str) -> list[float]:
+            assert text == 'for men warm'
+            return [0.12, 0.34, 0.56]
+
+    class _Vector:
+        def query(self, *, query_embedding, top_k, where):  # noqa: ANN001
+            assert top_k == 3
+            return [SearchHit(product_id='lift-seamless-tee', similarity_score=0.86)]
+
+    service._repository = _Repo()  # type: ignore[assignment]
+    service._embedding_client = _Embeddings()  # type: ignore[assignment]
+    service._vector_store = _Vector()  # type: ignore[assignment]
+    monkeypatch.setattr(
+        'app.search.service.parse_intent',
+        lambda _: ParsedIntent(
+            mode=RETRIEVAL_MODE_HYBRID,
+            semantic_query='for men warm',
+            filters=filters,
+        ),
+    )
+
+    result = service.retrieve('show warm tops for men under $40')
+    assert result.mode == RETRIEVAL_MODE_HYBRID
+    assert result.products == []
+    assert result.hits == []

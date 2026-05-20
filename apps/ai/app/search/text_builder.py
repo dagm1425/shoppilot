@@ -12,6 +12,7 @@ def build_embedding_text(product: ProductRecord) -> str:
         f'title: {product.name}',
         f'description: {product.description}',
         f'category: {product.category}',
+        f'thermal_profile: {product.thermal_profile}',
         f'features: {", ".join(features)}',
         f'tags: {", ".join(tags)}',
         f'price_cents: {product.price_cents}',
@@ -35,6 +36,7 @@ def _build_tags(product: ProductRecord) -> list[str]:
     return [
         product.category.lower(),
         product.gender.lower(),
+        product.thermal_profile.lower(),
         _price_bucket_tag(product.price_cents),
         'available' if product.available else 'unavailable',
     ]

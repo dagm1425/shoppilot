@@ -4,11 +4,13 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-FilterField = Literal['category', 'priceMinCents', 'priceMaxCents', 'availability', 'minRating']
-SemanticFacetGroup = Literal['gender', 'budget_tier']
+FilterField = Literal['category', 'gender', 'thermalProfile', 'priceMinCents', 'priceMaxCents', 'availability', 'minRating']
+SemanticFacetGroup = Literal['gender', 'budget_tier', 'climate']
 
 _DEFAULT_FILTERS: dict[FilterField, str | int | float | bool | None] = {
     'category': None,
+    'gender': None,
+    'thermalProfile': None,
     'priceMinCents': None,
     'priceMaxCents': None,
     'availability': None,
@@ -41,6 +43,18 @@ _CLEAR_PATTERNS: dict[FilterField, tuple[str, ...]] = {
         'ignore price',
         'remove budget',
     ),
+    'gender': (
+        'any gender',
+        'ignore gender',
+    ),
+    'thermalProfile': (
+        'any weather',
+        'any climate',
+        'ignore weather',
+        'ignore climate',
+        'all weather',
+        'all climate',
+    ),
     'availability': (
         'any availability',
         'ignore availability',
@@ -63,6 +77,29 @@ _FACET_RULES: dict[SemanticFacetGroup, dict[str, tuple[str, ...]]] = {
         'premium': ('premium', 'high-end', 'luxury'),
         'budget': ('budget friendly', 'affordable', 'cheap', 'budget'),
         'mid_range': ('mid-range', 'mid range'),
+    },
+    'climate': {
+        'cold_weather': (
+            'warm',
+            'cold weather',
+            'cold-weather',
+            'winter',
+            'insulated',
+            'fleece',
+            'merino',
+            'thermal',
+        ),
+        'hot_weather': (
+            'breathable',
+            'hot weather',
+            'hot-weather',
+            'warm weather',
+            'warm-weather',
+            'summer',
+            'lightweight',
+            'airflow',
+            'ventilated',
+        ),
     },
 }
 
@@ -111,12 +148,17 @@ def extract_semantic_constraints(message: str) -> tuple[dict[SemanticFacetGroup,
     facets: dict[SemanticFacetGroup, str] = {}
 
     for group, canonical_terms in _FACET_RULES.items():
-        latest: tuple[str, int] | None = None
+        latest: tuple[str, int, int] | None = None
         for canonical_value, synonyms in canonical_terms.items():
             for synonym in synonyms:
                 for match in re.finditer(rf'\b{re.escape(synonym)}\b', lowered):
-                    if latest is None or match.start() > latest[1]:
-                        latest = (canonical_value, match.start())
+                    synonym_length = len(synonym)
+                    if (
+                        latest is None
+                        or match.start() > latest[1]
+                        or (match.start() == latest[1] and synonym_length > latest[2])
+                    ):
+                        latest = (canonical_value, match.start(), synonym_length)
         if latest is not None:
             facets[group] = latest[0]
 
@@ -179,6 +221,49 @@ def merge_semantic_constraints(
                 facet_tokens.update({'budget', 'affordable', 'cheap'})
             elif value == 'mid_range':
                 facet_tokens.update({'mid', 'range'})
+        if group == 'climate':
+            if value == 'cold_weather':
+                facet_tokens.update(
+                    {
+                        'warm',
+                        'cold',
+                        'cold-weather',
+                        'weather',
+                        'winter',
+                        'insulated',
+                        'fleece',
+                        'merino',
+                        'thermal',
+                        'breathable',
+                        'hot-weather',
+                        'summer',
+                        'warm-weather',
+                        'lightweight',
+                        'airflow',
+                        'ventilated',
+                    },
+                )
+            elif value == 'hot_weather':
+                facet_tokens.update(
+                    {
+                        'breathable',
+                        'hot-weather',
+                        'weather',
+                        'summer',
+                        'warm-weather',
+                        'lightweight',
+                        'airflow',
+                        'ventilated',
+                        'warm',
+                        'cold',
+                        'cold-weather',
+                        'winter',
+                        'insulated',
+                        'fleece',
+                        'merino',
+                        'thermal',
+                    },
+                )
 
     merged_terms = [term for term in merged_terms if term not in facet_tokens]
     terms_changed = reset_requested or merged_terms != prior_terms
@@ -215,6 +300,12 @@ def build_merged_semantic_query(
     elif budget_tier == 'mid_range':
         parts.append('mid range')
 
+    climate = facets.get('climate')
+    if climate == 'cold_weather':
+        parts.append('cold weather')
+    elif climate == 'hot_weather':
+        parts.append('hot weather breathable')
+
     parts.extend(terms)
     merged = ' '.join(part.strip() for part in parts if part.strip() != '').strip()
     return merged or fallback_query.strip()
@@ -228,8 +319,11 @@ def apply_filter_refinement(
     facets: dict[str, str],
     has_memory: bool,
 ) -> RefinementMergeResult:
+    # For non-memory turns (including reset), start from clean defaults so
+    # stale constraints from prior state cannot leak into the new request.
+    base_filters = prior_filters if has_memory else _DEFAULT_FILTERS
     merged: dict[FilterField, str | int | float | bool | None] = {
-        key: prior_filters.get(key, _DEFAULT_FILTERS[key])
+        key: base_filters.get(key, _DEFAULT_FILTERS[key])
         for key in _DEFAULT_FILTERS
     }
     original = merged.copy()

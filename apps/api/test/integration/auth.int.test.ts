@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import argon2 from 'argon2';
 import type { INestApplication } from '@nestjs/common';
+import { getStorageToken, type ThrottlerStorageService } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { parseEnv } from '../../src/config/env.js';
 import { createTestApp } from '../helpers/test-app.js';
@@ -353,6 +354,8 @@ describe('Auth flows (integration)', () => {
   beforeEach(() => {
     prismaMock.reset();
     passwordResetMailerMock.reset();
+    const throttlerStorage = app.get<ThrottlerStorageService>(getStorageToken() as never);
+    throttlerStorage.storage.clear();
   });
 
   afterAll(async () => {

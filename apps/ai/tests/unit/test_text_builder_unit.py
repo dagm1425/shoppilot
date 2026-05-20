@@ -13,6 +13,7 @@ def test_build_embedding_text_contains_required_semantic_fields() -> None:
         description='Mid-weight hoodie for recovery days',
         category='tops',
         gender='men',
+        thermal_profile='cold_weather',
         fit='regular fit',
         color='black',
         price_cents=6000,
@@ -28,6 +29,7 @@ def test_build_embedding_text_contains_required_semantic_fields() -> None:
     assert 'title: Power Hoodie' in text
     assert 'description: Mid-weight hoodie for recovery days' in text
     assert 'category: tops' in text
+    assert 'thermal_profile: cold_weather' in text
     assert 'features:' in text
     assert 'tags:' in text
     assert 'price_cents: 6000' in text

@@ -30,13 +30,38 @@ _BOTTOM_CATEGORY_TERMS = (
     'leggings',
     'pants',
 )
+_MEN_TERMS = ('men', "men's", 'mens', 'male')
+_WOMEN_TERMS = ('women', "women's", 'womens', 'female')
+_UNISEX_TERMS = ('unisex',)
+_COLD_WEATHER_TERMS = (
+    'cold weather',
+    'cold-weather',
+    'winter',
+    'insulated',
+    'thermal',
+    'fleece',
+    'merino',
+)
+_HOT_WEATHER_TERMS = (
+    'hot weather',
+    'hot-weather',
+    'warm weather',
+    'warm-weather',
+    'summer',
+    'breathable',
+    'lightweight',
+    'airflow',
+    'cooling',
+    'ventilated',
+)
+_ALL_SEASON_TERMS = ('all season', 'all-season')
 
 _PRICE_PATTERN = r'(?:\$|usd\s*)?(\d+(?:\.\d{1,2})?)'
 _BETWEEN_PATTERN = re.compile(rf'between\s+{_PRICE_PATTERN}\s+(?:and|to)\s+{_PRICE_PATTERN}', re.IGNORECASE)
 _UNDER_PATTERN = re.compile(rf'(?:under|below|less than|max)\s+{_PRICE_PATTERN}', re.IGNORECASE)
 _OVER_PATTERN = re.compile(rf'(?:over|above|more than|min(?:imum)?)\s+{_PRICE_PATTERN}', re.IGNORECASE)
 _RATING_PATTERN = re.compile(
-    r'(?:rating\s*(?:at least|>=|>|minimum)?\s*|at least\s*)(\d(?:\.\d)?)\s*(?:\+|\s*stars?)?',
+    r'(?:rat(?:e|ed|ing)\s*(?:at least|>=|>|minimum)?\s*|at least\s*)(\d(?:\.\d)?)\s*(?:\+|\s*stars?)?',
     re.IGNORECASE,
 )
 
@@ -44,7 +69,8 @@ _NOISE_PATTERN = re.compile(
     r'(?:\b(?:tops?|bottoms?|tee|tank|hoodie|shorts?|joggers?|leggings?|pants|'
     r'under|below|less than|over|above|more than|between|and|available|in stock|'
     r'out of stock|unavailable|rating|stars?|usd|dollars?|products?|items?|'
-    r'show|find|recommend|at\s+least|minimum)\b|\$?\d+(?:\.\d{1,2})?)',
+    r'show|find|recommend|at\s+least|minimum|men|mens|women|womens|male|female|unisex|'
+    r'cold-weather|cold weather|hot-weather|hot weather|warm-weather|warm weather|winter|summer|all-season|all season)\b|\$?\d+(?:\.\d{1,2})?)',
     re.IGNORECASE,
 )
 
@@ -58,6 +84,22 @@ def parse_intent(message: str) -> ParsedIntent:
         category = 'tops'
     elif _contains_any_term(lowered, _BOTTOM_CATEGORY_TERMS):
         category = 'bottoms'
+
+    gender = None
+    if _contains_any_term(lowered, _UNISEX_TERMS):
+        gender = 'unisex'
+    elif _contains_any_term(lowered, _MEN_TERMS):
+        gender = 'men'
+    elif _contains_any_term(lowered, _WOMEN_TERMS):
+        gender = 'women'
+
+    thermal_profile = None
+    if _contains_any_term(lowered, _ALL_SEASON_TERMS):
+        thermal_profile = 'all_season'
+    elif _contains_any_term(lowered, _COLD_WEATHER_TERMS):
+        thermal_profile = 'cold_weather'
+    elif _contains_any_term(lowered, _HOT_WEATHER_TERMS):
+        thermal_profile = 'hot_weather'
 
     price_min_cents = None
     price_max_cents = None
@@ -89,6 +131,8 @@ def parse_intent(message: str) -> ParsedIntent:
 
     filters = RetrievalFilters(
         category=category,
+        gender=gender,
+        thermal_profile=thermal_profile,
         price_min_cents=price_min_cents,
         price_max_cents=price_max_cents,
         availability=availability,

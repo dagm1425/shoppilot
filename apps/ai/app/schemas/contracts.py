@@ -62,6 +62,8 @@ class FinalRecommendation(StrictModel):
 
 class NormalizedFilters(StrictModel):
     category: str | None = None
+    gender: str | None = None
+    thermal_profile: str | None = Field(default=None, alias='thermalProfile')
     price_min_cents: int | None = Field(default=None, ge=0, alias='priceMinCents')
     price_max_cents: int | None = Field(default=None, ge=0, alias='priceMaxCents')
     availability: bool | None = None

@@ -24,6 +24,7 @@ class ProductRecord:
     description: str
     category: str
     gender: str
+    thermal_profile: str
     fit: str
     color: str
     price_cents: int
@@ -37,6 +38,8 @@ class ProductRecord:
 @dataclass(frozen=True)
 class RetrievalFilters:
     category: str | None = None
+    gender: str | None = None
+    thermal_profile: str | None = None
     price_min_cents: int | None = None
     price_max_cents: int | None = None
     availability: bool | None = None
@@ -47,6 +50,8 @@ class RetrievalFilters:
             value is not None
             for value in (
                 self.category,
+                self.gender,
+                self.thermal_profile,
                 self.price_min_cents,
                 self.price_max_cents,
                 self.availability,

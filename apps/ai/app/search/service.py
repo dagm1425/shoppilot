@@ -19,6 +19,85 @@ from app.search.query_intent import parse_intent
 from app.search.repository import ProductRepository
 from app.search.vector_store import ProductVectorStore
 
+_SEMANTIC_PRECISION_TOKENS = {
+    'warm',
+    'cold',
+    'winter',
+    'summer',
+    'hot-weather',
+    'cold-weather',
+    'cool-weather',
+    'breathable',
+    'insulated',
+    'fleece',
+    'merino',
+    'layer',
+}
+
+_LOW_SIGNAL_SEMANTIC_TOKENS = {
+    'for',
+    'men',
+    'male',
+    'womens',
+    'women',
+    'female',
+    'unisex',
+    'budget',
+    'friendly',
+    'premium',
+    'mid',
+    'range',
+    'show',
+    'find',
+    'recommend',
+    'options',
+    'option',
+    'items',
+    'item',
+    'products',
+    'product',
+    'stock',
+    'available',
+    'in',
+    'out',
+    'tops',
+    'top',
+    'bottoms',
+    'bottom',
+    'how',
+    'about',
+}
+
+_WARM_INTENT_TOKENS = {
+    'warm',
+    'cold',
+    'winter',
+    'insulated',
+    'fleece',
+    'merino',
+    'thermal',
+    'layer',
+}
+
+_COOLING_INTENT_TOKENS = {
+    'breathable',
+    'hot-weather',
+    'summer',
+    'lightweight',
+    'airflow',
+    'ventilated',
+}
+
+_WARM_PRODUCT_POSITIVE_PATTERNS = (
+    r'\bcold-weather\b',
+    r'\bwinter\b',
+    r'\binsulated\b',
+    r'\bfleece\b',
+    r'\bmerino\b',
+    r'\bthermal\b',
+    r'\bwarm\b(?!-weather)',
+)
+
 
 class SemanticSearchService:
     def __init__(self, settings: AppSettings) -> None:
@@ -76,11 +155,12 @@ class SemanticSearchService:
             SearchHit(product_id=product.product_id, similarity_score=_rank_score(index))
             for index, product in enumerate(products)
         ]
-        products, hits = _apply_gender_constraint(
-            products=products,
-            hits=hits,
-            semantic_query=intent.semantic_query,
-        )
+        if intent.filters.gender is None:
+            products, hits = _apply_gender_constraint(
+                products=products,
+                hits=hits,
+                semantic_query=intent.semantic_query,
+            )
         return RetrievalResult(
             mode=intent.mode,
             filters=intent.filters,
@@ -106,11 +186,12 @@ class SemanticSearchService:
         )
         products = self._hydrate_products(strong_hits)
         hydrated_hits = _hydrate_hits(products=products, hits=strong_hits)
-        products, hydrated_hits = _apply_gender_constraint(
-            products=products,
-            hits=hydrated_hits,
-            semantic_query=intent.semantic_query,
-        )
+        if intent.filters.gender is None:
+            products, hydrated_hits = _apply_gender_constraint(
+                products=products,
+                hits=hydrated_hits,
+                semantic_query=intent.semantic_query,
+            )
         return RetrievalResult(
             mode=intent.mode,
             filters=intent.filters,
@@ -151,7 +232,7 @@ class SemanticSearchService:
             relative_floor=relative_floor,
         )
         if not strong_hits:
-            if intent.filters.count() > 0:
+            if intent.filters.count() > 0 and _allows_structured_hybrid_rescue(intent.semantic_query):
                 # Hybrid rescue: when semantic gating over-prunes, return deterministic
                 # structured results instead of empty.
                 return self._structured_retrieval(intent, top_k=top_k)
@@ -166,11 +247,28 @@ class SemanticSearchService:
 
         products = self._hydrate_products(strong_hits)
         hydrated_hits = _hydrate_hits(products=products, hits=strong_hits)
-        products, hydrated_hits = _apply_gender_constraint(
+        if intent.filters.gender is None:
+            products, hydrated_hits = _apply_gender_constraint(
+                products=products,
+                hits=hydrated_hits,
+                semantic_query=intent.semantic_query,
+            )
+        products, hydrated_hits = _apply_semantic_precision_guard(
             products=products,
             hits=hydrated_hits,
             semantic_query=intent.semantic_query,
         )
+        if not products:
+            if intent.filters.count() > 0 and _allows_structured_hybrid_rescue(intent.semantic_query):
+                return self._structured_retrieval(intent, top_k=top_k)
+            return RetrievalResult(
+                mode=intent.mode,
+                filters=intent.filters,
+                semantic_query=intent.semantic_query,
+                hits=[],
+                products=[],
+                candidate_count=len(candidate_ids),
+            )
         return RetrievalResult(
             mode=intent.mode,
             filters=intent.filters,
@@ -213,6 +311,12 @@ def _build_vector_where(filters: RetrievalFilters, candidate_ids: list[str]) -> 
 
     if filters.category:
         conditions.append({'category': {'$eq': filters.category}})
+
+    if filters.gender:
+        conditions.append({'gender': {'$eq': filters.gender}})
+
+    if filters.thermal_profile:
+        conditions.append({'thermal_profile': {'$eq': filters.thermal_profile}})
 
     if filters.availability is not None:
         conditions.append({'availability': {'$eq': filters.availability}})
@@ -263,6 +367,74 @@ def _filter_semantic_hits(
         for hit in hits
         if hit.similarity_score >= dynamic_floor
     ]
+
+
+def _allows_structured_hybrid_rescue(semantic_query: str) -> bool:
+    lowered = semantic_query.lower().strip()
+    if lowered == '':
+        return True
+
+    tokens = re.findall(r"[a-z]+(?:-[a-z]+)?", lowered)
+    if any(token in _SEMANTIC_PRECISION_TOKENS for token in tokens):
+        return False
+
+    meaningful_tokens = [
+        token
+        for token in tokens
+        if token not in _LOW_SIGNAL_SEMANTIC_TOKENS
+    ]
+    return len(meaningful_tokens) <= 1
+
+
+def _apply_semantic_precision_guard(
+    *,
+    products: list[ProductRecord],
+    hits: list[SearchHit],
+    semantic_query: str,
+) -> tuple[list[ProductRecord], list[SearchHit]]:
+    precision_tokens = _extract_precision_tokens(semantic_query)
+    if not precision_tokens:
+        return products, hits
+
+    score_by_id = {hit.product_id: hit.similarity_score for hit in hits}
+    filtered_products = [
+        product
+        for product in products
+        if _product_matches_precision_tokens(product, precision_tokens)
+    ]
+    filtered_hits = [
+        SearchHit(
+            product_id=product.product_id,
+            similarity_score=score_by_id.get(product.product_id, 0.0),
+        )
+        for product in filtered_products
+    ]
+    return filtered_products, filtered_hits
+
+
+def _extract_precision_tokens(query: str) -> set[str]:
+    tokens = set(re.findall(r"[a-z]+(?:-[a-z]+)?", query.lower()))
+    return {
+        token
+        for token in tokens
+        if token in _SEMANTIC_PRECISION_TOKENS
+    }
+
+
+def _product_matches_precision_tokens(product: ProductRecord, precision_tokens: set[str]) -> bool:
+    text = f'{product.name} {product.description}'.lower()
+    if _is_warm_intent(precision_tokens):
+        return any(re.search(pattern, text) for pattern in _WARM_PRODUCT_POSITIVE_PATTERNS)
+    return any(
+        re.search(rf'\b{re.escape(token)}\b', text)
+        for token in precision_tokens
+    )
+
+
+def _is_warm_intent(precision_tokens: set[str]) -> bool:
+    has_warm = any(token in _WARM_INTENT_TOKENS for token in precision_tokens)
+    has_cooling = any(token in _COOLING_INTENT_TOKENS for token in precision_tokens)
+    return has_warm and not has_cooling
 
 
 def _resolve_semantic_thresholds(
@@ -328,6 +500,10 @@ def _matches_gender_constraint(raw_gender: str, constraint: str) -> bool:
     if constraint == 'male':
         return normalized in {'male', 'men', 'mens', 'unisex'}
     if constraint == 'female':
+        return normalized in {'female', 'women', 'womens', 'unisex'}
+    if constraint == 'men':
+        return normalized in {'male', 'men', 'mens', 'unisex'}
+    if constraint == 'women':
         return normalized in {'female', 'women', 'womens', 'unisex'}
     if constraint == 'unisex':
         return normalized == 'unisex'

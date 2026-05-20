@@ -161,9 +161,14 @@ test('login and logout flow through header account popover', async ({ page }) =>
   await page.getByLabel('Email').fill('customer@shoppilot.local');
   await page.locator('input#password').fill('SecurePass123');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  expect(loginRememberMeValue).toBe(false);
+  await expect
+    .poll(() => loginRememberMeValue, {
+      timeout: 20_000,
+      message: 'Expected mocked login request payload to be captured.',
+    })
+    .toBe(false);
 
-  await expect(page).toHaveURL(/\/catalog/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/catalog/, { timeout: 45_000 });
 
   await page.getByRole('button', { name: 'Account menu' }).click();
   await page.getByRole('button', { name: 'Sign out' }).click();

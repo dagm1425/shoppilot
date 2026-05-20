@@ -88,7 +88,13 @@ LLM_SYNTHESIS_PROVIDER=gemini
 LLM_SYNTHESIS_API_KEY=your-gemini-api-key
 LLM_SYNTHESIS_MODEL=gemini-2.5-flash
 LLM_SYNTHESIS_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+AI_QUERY_PLANNER_ENABLED=true
+AI_QUERY_PLANNER_TIMEOUT_MS=3000
 ```
+
+The query updater runs planner-first on every turn:
+- primary path: canonical LLM query updater emits retrieval mode + normalized filters + semantic query
+- fallback path: deterministic parse/refinement logic when updater fails (timeout/error/invalid output)
 
 Temporary backward-compatible synthesis aliases are still accepted:
 
@@ -104,6 +110,7 @@ If deprecated aliases are used, the service logs a startup warning.
 ## Synthesis and retrieval boundaries
 
 - retrieval and product ranking remain tool-driven
+- canonical query updater is planner-first with deterministic fallback
 - LLM synthesis rewrites user-facing `assistantMessage` and `followUpPrompts`
 - synthesis failure falls back to deterministic graph messaging
 - embedding path stays explicitly Gemini-based and unchanged by synthesis migration

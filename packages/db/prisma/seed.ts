@@ -1,5 +1,11 @@
 import argon2 from 'argon2';
-import { PrismaClient, ProductCategory, ProductGender, Role } from '@prisma/client';
+import {
+  PrismaClient,
+  ProductCategory,
+  ProductGender,
+  ProductThermalProfile,
+  Role,
+} from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -422,7 +428,7 @@ const CATALOG_PRODUCTS = [
     slug: 'sculpt-support-bra-women',
     name: 'Sculpt Support Bra',
     description:
-      'Supportive sports bra with breathable knit and moisture control for warm workout sessions.',
+      'Supportive sports bra with breathable knit and moisture control for hot-weather workout sessions.',
     category: ProductCategory.TOPS,
     gender: ProductGender.WOMEN,
     fit: 'Supportive fit',
@@ -575,7 +581,7 @@ async function seedAuthData() {
 }
 
 async function seedCatalogData() {
-  const seedKey = 'phase-1-catalog-seed-v5';
+  const seedKey = 'phase-1-catalog-seed-v6';
 
   const existing = await prisma.seedMarker.findUnique({
     where: { key: seedKey },
@@ -587,15 +593,43 @@ async function seedCatalogData() {
   }
 
   for (const product of CATALOG_PRODUCTS) {
+    const thermalProfile = deriveThermalProfile(product.description);
+    const productData = { ...product, thermalProfile };
     await prisma.product.upsert({
       where: { slug: product.slug },
-      update: { ...product },
-      create: { ...product },
+      update: productData,
+      create: productData,
     });
   }
 
   await prisma.seedMarker.create({ data: { key: seedKey } });
   console.log('Catalog seed completed.');
+}
+
+function deriveThermalProfile(description: string): ProductThermalProfile {
+  const lowered = description.toLowerCase();
+
+  if (/\ball-season\b|\ball season\b/.test(lowered)) {
+    return ProductThermalProfile.ALL_SEASON;
+  }
+
+  if (
+    /\bhot-weather\b|\bhot weather\b|\bwarm-weather\b|\bwarm weather\b|\bsummer\b|\bbreathable\b|\blightweight\b|\bcooling\b|\bairflow\b|\bventilated\b/.test(
+      lowered,
+    )
+  ) {
+    return ProductThermalProfile.HOT_WEATHER;
+  }
+
+  if (
+    /\bcold-weather\b|\bcold weather\b|\bwinter\b|\binsulated\b|\bthermal\b|\bfleece\b|\bmerino\b|\bchilly\b|\bwarm\b/.test(
+      lowered,
+    )
+  ) {
+    return ProductThermalProfile.COLD_WEATHER;
+  }
+
+  return ProductThermalProfile.ALL_SEASON;
 }
 
 async function main() {

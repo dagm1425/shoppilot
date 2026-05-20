@@ -20,6 +20,8 @@ process.env.AUTH_RESET_RATE_LIMIT_WINDOW_MINUTES =
   process.env.AUTH_RESET_RATE_LIMIT_WINDOW_MINUTES ?? '30';
 process.env.AUTH_RESET_TOKEN_TTL_MINUTES = process.env.AUTH_RESET_TOKEN_TTL_MINUTES ?? '30';
 process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY ?? 'sk_test_dummy';
+process.env.STRIPE_WEBHOOK_SECRET =
+  process.env.STRIPE_WEBHOOK_SECRET ?? 'whsec_test_int';
 process.env.EMAIL_FROM_ADDRESS = process.env.EMAIL_FROM_ADDRESS ?? 'onboarding@resend.dev';
 process.env.EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? 'ShopPilot';
 process.env.EMAIL_RESET_BASE_URL =

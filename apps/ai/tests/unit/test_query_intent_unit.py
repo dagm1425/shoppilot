@@ -9,13 +9,14 @@ from app.search.query_intent import parse_intent
 
 
 def test_parse_intent_detects_structured_filters_only() -> None:
-    result = parse_intent('Show tops under $50 in stock')
+    result = parse_intent('Show tops for men under $50 in stock')
 
     assert result.mode == RETRIEVAL_MODE_STRUCTURED
     assert result.filters.category == 'tops'
+    assert result.filters.gender == 'men'
     assert result.filters.price_max_cents == 5000
     assert result.filters.availability is True
-    assert result.filters.count() == 3
+    assert result.filters.count() == 4
 
 
 def test_parse_intent_detects_hybrid_when_filters_and_semantic_phrase_exist() -> None:
@@ -23,6 +24,7 @@ def test_parse_intent_detects_hybrid_when_filters_and_semantic_phrase_exist() ->
 
     assert result.mode == RETRIEVAL_MODE_HYBRID
     assert result.filters.category == 'tops'
+    assert result.filters.thermal_profile == 'hot_weather'
     assert result.filters.price_max_cents == 6000
     assert 'breathable' in result.semantic_query.lower()
 
@@ -45,6 +47,14 @@ def test_parse_intent_parses_between_and_rating_constraints() -> None:
     assert result.filters.min_rating == 4.5
 
 
+def test_parse_intent_parses_rated_phrase_variant() -> None:
+    result = parse_intent('show tops rated at least 4.2')
+
+    assert result.mode == RETRIEVAL_MODE_STRUCTURED
+    assert result.filters.category == 'tops'
+    assert result.filters.min_rating == 4.2
+
+
 def test_parse_intent_preserves_premium_semantic_signal_with_structured_filters() -> None:
     result = parse_intent('show tops under 80 dollars premium quality')
 
@@ -60,3 +70,10 @@ def test_parse_intent_normalizes_hyphenated_stock_phrases() -> None:
     assert result.mode == RETRIEVAL_MODE_STRUCTURED
     assert result.filters.category == 'tops'
     assert result.filters.availability is True
+
+
+def test_parse_intent_maps_explicit_cold_weather_to_structured_thermal_profile() -> None:
+    result = parse_intent('show tops for cold weather')
+
+    assert result.filters.category == 'tops'
+    assert result.filters.thermal_profile == 'cold_weather'

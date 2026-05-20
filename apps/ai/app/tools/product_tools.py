@@ -37,6 +37,12 @@ class AssistantTools:
         parsed_intent = parse_intent(payload.query)
         filters = RetrievalFilters(
             category=payload.category if payload.category is not None else parsed_intent.filters.category,
+            gender=payload.gender if payload.gender is not None else parsed_intent.filters.gender,
+            thermal_profile=(
+                payload.thermal_profile
+                if payload.thermal_profile is not None
+                else parsed_intent.filters.thermal_profile
+            ),
             price_min_cents=(
                 payload.price_min_cents
                 if payload.price_min_cents is not None
@@ -62,7 +68,7 @@ class AssistantTools:
         retrieval = self._search_service.retrieve_with_plan(
             retrieval_mode=payload.retrieval_mode,
             filters=filters,
-            semantic_query=parsed_intent.semantic_query,
+            semantic_query=payload.query,
             top_k=payload.top_k,
         )
         # future: llm response synthesis - handled in Phase 4.3 graph final-response stage
@@ -124,6 +130,8 @@ def get_assistant_tools() -> AssistantTools:
 def _to_normalized_filters(filters: RetrievalFilters) -> NormalizedFilters:
     return NormalizedFilters(
         category=filters.category,
+        gender=filters.gender,
+        thermal_profile=filters.thermal_profile,
         price_min_cents=filters.price_min_cents,
         price_max_cents=filters.price_max_cents,
         availability=filters.availability,

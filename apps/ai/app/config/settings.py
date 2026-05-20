@@ -75,6 +75,13 @@ class AppSettings(BaseSettings):
         validation_alias='AI_SEMANTIC_RELATIVE_FLOOR',
     )
     ai_llm_synthesis_enabled: bool = Field(default=True, validation_alias='AI_LLM_SYNTHESIS_ENABLED')
+    ai_query_planner_enabled: bool = Field(default=True, validation_alias='AI_QUERY_PLANNER_ENABLED')
+    ai_query_planner_timeout_ms: int = Field(
+        default=10000,
+        ge=10000,
+        le=30000,
+        validation_alias='AI_QUERY_PLANNER_TIMEOUT_MS',
+    )
     ai_llm_synthesis_timeout_ms: int = Field(
         default=8000,
         ge=1000,

@@ -29,6 +29,7 @@ WITH base_products AS (
     "description" AS description,
     lower("category"::text) AS category,
     lower("gender"::text) AS gender,
+    lower("thermalProfile"::text) AS thermal_profile,
     "fit" AS fit,
     "color" AS color,
     "priceCents" AS price_cents,
@@ -45,6 +46,7 @@ SELECT
   description,
   category,
   gender,
+  thermal_profile,
   fit,
   color,
   price_cents,
@@ -126,6 +128,14 @@ def _build_where_clause(filters: RetrievalFilters | None) -> tuple[str, dict[str
         clauses.append('category = %(category)s')
         params['category'] = filters.category.lower()
 
+    if filters.gender:
+        clauses.append('gender = %(gender)s')
+        params['gender'] = filters.gender.lower()
+
+    if filters.thermal_profile:
+        clauses.append('thermal_profile = %(thermal_profile)s')
+        params['thermal_profile'] = filters.thermal_profile.lower()
+
     if filters.price_min_cents is not None:
         clauses.append('price_cents >= %(price_min_cents)s')
         params['price_min_cents'] = filters.price_min_cents
@@ -155,6 +165,7 @@ def _rows_to_products(rows: list[dict[str, Any]]) -> list[ProductRecord]:
                 description=str(row['description']),
                 category=str(row['category']),
                 gender=str(row['gender']),
+                thermal_profile=str(row['thermal_profile']),
                 fit=str(row['fit']),
                 color=str(row['color']),
                 price_cents=int(row['price_cents']),
