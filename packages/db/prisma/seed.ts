@@ -24,9 +24,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 18,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1583454110551-21f2fa2adfcd?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/81O-J3L8klL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1574680077505-ff925e7e32ef?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71gN2oVaD6L._AC_SL1500_.jpg',
   },
   {
     slug: 'vital-seamless-legging',
@@ -42,9 +42,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 24,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1518459031867-a89b944bffe4?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/51AruKfAdQL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1483985988355-763728e1935b?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/51-o2V4r6YL._AC_SL1337_.jpg',
   },
   {
     slug: 'essential-cropped-tee',
@@ -60,9 +60,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 30,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/81YUBG3eciL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1445205170230-053b83016050?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71SR6dIgqBL._AC_SL1500_.jpg',
   },
   {
     slug: 'studio-training-jogger',
@@ -78,9 +78,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 12,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1473966968600-fa801b869a1a?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71kD4Pe411L.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1503341504253-dff4815485f1?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71rbqp7SGkL._AC_SL1500_.jpg',
   },
   {
     slug: 'power-hoodie',
@@ -96,9 +96,9 @@ const CATALOG_PRODUCTS = [
     available: false,
     stock: 0,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1618354691373-d851c5c3a990?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/6129DggIXvL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1617137968427-85924c800a22?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71pq3EXek2L._AC_SL1500_.jpg',
   },
   {
     slug: 'everyday-training-short',
@@ -114,9 +114,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 20,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1514996937319-344454492b37?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61O7+kYBMcL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1491553895911-0055eca6402d?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61x7fNAgA1L._AC_SL1001_.jpg',
   },
   {
     slug: 'flow-sports-bra',
@@ -132,9 +132,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 14,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/81VfUvVFNgL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1591047139829-d91aecb6caea?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71lAWy+4b0L._AC_SL1500_.jpg',
   },
   {
     slug: 'lift-seamless-tee',
@@ -150,9 +150,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 16,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1578932750294-f5075e85f44a?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71CCtVB9xmL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1562157873-818bc0726f68?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/81r563-PiRL._AC_SL1500_.jpg',
   },
   {
     slug: 'thermal-fleece-sweater',
@@ -168,9 +168,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 15,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/91q3miqFidL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1617137968427-85924c800a22?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/91QzH7ij7uL._AC_SL1500_.jpg',
   },
   {
     slug: 'alpine-halfzip-pullover',
@@ -186,9 +186,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 11,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1618354691373-d851c5c3a990?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71FYf8UnelL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1617137968427-85924c800a22?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/81m98VlUFBL._AC_SL1500_.jpg',
   },
   {
     slug: 'winter-training-crewneck',
@@ -204,9 +204,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 13,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1618354691373-d851c5c3a990?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71jX14il7fL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1617137968427-85924c800a22?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71Pxu9TTyxL._AC_SL1500_.jpg',
   },
   {
     slug: 'airflow-performance-tee-men',
@@ -222,9 +222,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 22,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1578932750294-f5075e85f44a?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61BuKm2+WPL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1562157873-818bc0726f68?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/618CN4He4GL._AC_SL1500_.jpg',
   },
   {
     slug: 'summit-merino-baselayer-men',
@@ -240,9 +240,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 10,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1578932750294-f5075e85f44a?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/81L7S4-XWYL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1618354691373-d851c5c3a990?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71crLuqUpHL._AC_SL1500_.jpg',
   },
   {
     slug: 'chill-shield-anorak-men',
@@ -258,9 +258,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 9,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1618354691373-d851c5c3a990?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71SIEJr4blL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1617137968427-85924c800a22?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61gGMjyhCPL._AC_SL1024_.jpg',
   },
   {
     slug: 'thermal-fleece-sweatpant-men',
@@ -276,9 +276,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 14,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1503341504253-dff4815485f1?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71rdzL0Le4L.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1473966968600-fa801b869a1a?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71F2g4zXvML._AC_SL1500_.jpg',
   },
   {
     slug: 'coldguard-track-pant-men',
@@ -294,9 +294,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 12,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1473966968600-fa801b869a1a?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71vmjNFoJGL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1503341504253-dff4815485f1?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61mhuvfSxbL._AC_SL1500_.jpg',
   },
   {
     slug: 'ultralight-run-short-men',
@@ -312,9 +312,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 25,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1514996937319-344454492b37?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61gtyu9hsLL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1491553895911-0055eca6402d?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71RBTOedZQL._AC_SL1500_.jpg',
   },
   {
     slug: 'vent-mesh-training-short-men',
@@ -330,9 +330,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 21,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1514996937319-344454492b37?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/617ATXVhyjL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1491553895911-0055eca6402d?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71GoPfWgx-L._AC_SL1500_.jpg',
   },
   {
     slug: 'allseason-stretch-jogger-men',
@@ -348,9 +348,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 17,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1473966968600-fa801b869a1a?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61Kwr87jA9L.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1503341504253-dff4815485f1?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61TYLX2UwdL._AC_SL1500_.jpg',
   },
   {
     slug: 'cozy-knit-sweater-women',
@@ -366,9 +366,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 16,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1445205170230-053b83016050?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/717EPQByVML.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71-Y1kW9kDL._AC_SL1500_.jpg',
   },
   {
     slug: 'thermal-zip-fleece-women',
@@ -384,9 +384,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 12,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1445205170230-053b83016050?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61N1ggxzmRL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71hVS7hhhOL._AC_SL1500_.jpg',
   },
   {
     slug: 'breeze-mesh-tee-women',
@@ -402,9 +402,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 23,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71H7iRI+pTL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1445205170230-053b83016050?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61dvXlsnS3L._AC_SL1500_.jpg',
   },
   {
     slug: 'airflow-racerback-tank-women',
@@ -420,9 +420,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 26,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71-T2LHikYL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1445205170230-053b83016050?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71arQUkQ95L._AC_SL1500_.jpg',
   },
   {
     slug: 'sculpt-support-bra-women',
@@ -438,9 +438,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 19,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61GgeC8fJzL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1591047139829-d91aecb6caea?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71tkZzf2CwL._AC_SL1500_.jpg',
   },
   {
     slug: 'fleece-lounge-sweatpant-women',
@@ -456,9 +456,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 14,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1483985988355-763728e1935b?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/618F0p3srbL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1518459031867-a89b944bffe4?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71iiUAeHK0L._AC_SL1500_.jpg',
   },
   {
     slug: 'cold-weather-legging-women',
@@ -474,9 +474,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 13,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1518459031867-a89b944bffe4?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71FhHYrvVVL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1483985988355-763728e1935b?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71Fhkml7seL._AC_SL1500_.jpg',
   },
   {
     slug: 'quickdry-run-short-women',
@@ -492,9 +492,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 24,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1483985988355-763728e1935b?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71sQ8Z6ipLL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1518459031867-a89b944bffe4?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71PGlXvO0eL._AC_SL1500_.jpg',
   },
   {
     slug: 'breathable-bike-short-women',
@@ -510,9 +510,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 20,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1518459031867-a89b944bffe4?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/71dIYgaX09L.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1483985988355-763728e1935b?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/619wVWhmeoL._AC_SL1500_.jpg',
   },
   {
     slug: 'allseason-studio-jogger-women',
@@ -528,9 +528,9 @@ const CATALOG_PRODUCTS = [
     available: true,
     stock: 18,
     primaryImageUrl:
-      'https://images.unsplash.com/photo-1483985988355-763728e1935b?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61WNIrguNBL.jpg',
     secondaryImageUrl:
-      'https://images.unsplash.com/photo-1518459031867-a89b944bffe4?q=80&w=800&auto=format&fit=crop',
+      'https://m.media-amazon.com/images/I/61+yVPaIeCL._AC_SL1500_.jpg',
   },
 ] as const;
 
@@ -581,7 +581,7 @@ async function seedAuthData() {
 }
 
 async function seedCatalogData() {
-  const seedKey = 'phase-1-catalog-seed-v6';
+  const seedKey = 'phase-1-catalog-seed-v7';
 
   const existing = await prisma.seedMarker.findUnique({
     where: { key: seedKey },
