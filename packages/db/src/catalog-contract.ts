@@ -53,6 +53,7 @@ export type CatalogProductDetails = {
   gender: CatalogGender;
   fit: string;
   color: string;
+  rating: number;
   priceCents: number;
   currency: string;
   available: boolean;

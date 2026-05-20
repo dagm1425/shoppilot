@@ -14,7 +14,7 @@ export function AppShell({ title, subtitle, children, variant = 'default' }: App
       <main id="main-content" className={cn('min-h-screen bg-auth-radial px-4 py-10 sm:px-6 lg:px-8')}>
         <div className="mx-auto w-full max-w-auth">
           <header className="mb-6 text-center font-auth-body">
-            <p className="text-xs uppercase tracking-[0.22em] text-auth-muted">ShopPilot Account</p>
+            <p className="text-xs uppercase tracking-[0.22em] text-auth-muted">Athlora Account</p>
             <h1 className="mt-4 font-auth-heading text-3xl font-bold uppercase tracking-[0.06em] text-auth-ink">
               {title}
             </h1>

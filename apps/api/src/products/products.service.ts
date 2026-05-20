@@ -123,6 +123,12 @@ function mapAdminProductMutationResponse(
   };
 }
 
+function deriveCatalogRating(available: boolean, stock: number): number {
+  const unclamped = 3.1 + (available ? 0.9 : -0.4) + Math.min(stock, 30) / 35;
+  const bounded = Math.min(5, Math.max(2.8, unclamped));
+  return Number(bounded.toFixed(1));
+}
+
 @Injectable()
 export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
@@ -259,6 +265,7 @@ export class ProductsService {
         gender: fromPrismaGender(product.gender),
         fit: product.fit,
         color: product.color,
+        rating: deriveCatalogRating(product.available, product.stock),
         priceCents: product.priceCents,
         currency: product.currency,
         available: product.available,

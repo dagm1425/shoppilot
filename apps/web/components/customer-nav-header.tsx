@@ -430,7 +430,7 @@ export function CustomerNavHeader() {
           href="/"
           className="shrink-0 font-auth-heading text-lg font-bold uppercase tracking-wide text-foreground"
         >
-          ShopPilot
+          Athlora
         </Link>
 
         <nav className="hidden h-full items-center pl-4 lg:flex" aria-label="Primary categories">

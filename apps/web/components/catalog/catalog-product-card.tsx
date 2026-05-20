@@ -1,5 +1,6 @@
 import type { CatalogProductListItem } from '@shoppilot/db/catalog-contract';
 import Link from 'next/link';
+import { useState } from 'react';
 import { WishlistToggleButton } from '../cart-wishlist/wishlist-toggle-button';
 
 type CatalogProductCardProps = {
@@ -8,6 +9,8 @@ type CatalogProductCardProps = {
 };
 
 export function CatalogProductCard({ product, formatMoney }: CatalogProductCardProps) {
+  const [isPrimaryImageReady, setPrimaryImageReady] = useState(false);
+
   return (
     <article className="flex min-w-0 flex-col">
       <Link
@@ -16,19 +19,25 @@ export function CatalogProductCard({ product, formatMoney }: CatalogProductCardP
         className="group block"
       >
         <div className="relative">
-          <div className="relative aspect-[4/5] overflow-hidden bg-muted">
+          <div
+            className={`relative aspect-[4/5] overflow-hidden transition-colors duration-200 ${
+              isPrimaryImageReady ? 'bg-white' : 'bg-muted'
+            }`}
+          >
             <img
               src={product.primaryImageUrl}
               alt={`${product.name} image`}
               loading="lazy"
-              className="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-0"
+              onLoad={() => setPrimaryImageReady(true)}
+              onError={() => setPrimaryImageReady(true)}
+              className="absolute inset-0 h-full w-full object-contain p-2 transition-opacity duration-200 group-hover:opacity-0"
             />
             {product.secondaryImageUrl ? (
               <img
                 src={product.secondaryImageUrl}
                 alt={`${product.name} alternate image`}
                 loading="lazy"
-                className="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                className="absolute inset-0 h-full w-full object-contain p-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
               />
             ) : null}
           </div>

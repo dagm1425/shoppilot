@@ -14,6 +14,7 @@ const assistantProductSchema = z
     available: z.boolean(),
     rating: z.number().min(0).max(5).nullable().optional(),
     shortDescription: z.string().trim().nullable().optional(),
+    primaryImageUrl: z.string().trim().min(1).nullable().optional(),
   })
   .strict();
 

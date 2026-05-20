@@ -12,6 +12,7 @@ export type ProductDetails = {
   description: string;
   fit: string;
   color: string;
+  rating: number;
   priceLabel: string;
   available: boolean;
   stock: number;
@@ -53,13 +54,11 @@ export function ProductDetailsPanel({ product }: ProductDetailsPanelProps) {
       </header>
 
       <section className="flex items-center justify-between border-y border-border py-6">
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 text-sm leading-5 text-foreground transition-colors hover:text-muted-foreground"
-        >
+        <div className="inline-flex items-center gap-1 text-sm leading-5 text-foreground">
           <LuStar className="size-3.5 fill-foreground text-foreground" aria-hidden="true" />
-          <span>Reviews</span>
-        </button>
+          <span>{product.rating.toFixed(1)}</span>
+          <span className="text-muted-foreground">/ 5</span>
+        </div>
         <div className="flex items-center gap-2">
           <WishlistToggleButton
             productId={product.productId}

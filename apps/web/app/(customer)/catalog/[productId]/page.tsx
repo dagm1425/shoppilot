@@ -54,6 +54,7 @@ export default async function ProductDetailsPage({ params }: ProductDetailsPageP
     description: product.description,
     fit: product.fit,
     color: product.color,
+    rating: product.rating,
     priceLabel: formatMoney(product.priceCents, product.currency),
     available: product.available,
     stock: product.stock,

@@ -16,8 +16,8 @@ const roboto = Roboto({
 });
 
 export const metadata: Metadata = {
-  title: 'ShopPilot Foundation',
-  description: 'Phase 0 foundation diagnostics UI',
+  title: 'Athlora Foundation',
+  description: 'Athlora storefront diagnostics UI',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -335,6 +335,7 @@ function buildSnapshot(input: AssistantSnapshotInput) {
             available: true,
             rating: 4.6,
             shortDescription: 'Breathable trainer for daily runs.',
+            primaryImageUrl: 'https://cdn.example.com/runner-pro.jpg',
           },
         ],
         comparisonSummary: input.comparisonSummary ?? null,
@@ -476,7 +477,7 @@ describe('Assistant modal integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open assistant' }));
 
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: /attach/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/try: running shoes/i)).not.toBeInTheDocument();
@@ -497,7 +498,7 @@ describe('Assistant modal integration', () => {
     fireEvent.change(screen.getByLabelText('Assistant message'), {
       target: { value: 'Recommend running shoes under $100' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     expect(await screen.findByText('Thinking...')).toBeInTheDocument();
 
@@ -506,7 +507,7 @@ describe('Assistant modal integration', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Runner Pro')).toBeInTheDocument();
     expect(screen.getByText('Runner Pro is lighter than Trail Max.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Show lighter options' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show lighter options' })).not.toBeInTheDocument();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = fetchMock.mock.calls[0];
@@ -550,7 +551,7 @@ describe('Assistant modal integration', () => {
     fireEvent.change(screen.getByLabelText('Assistant message'), {
       target: { value: 'Recommend trail shoes' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     expect(await screen.findByText('Assistant request failed')).toBeInTheDocument();
     expect(
@@ -587,7 +588,7 @@ describe('Assistant modal integration', () => {
     fireEvent.change(screen.getByLabelText('Assistant message'), {
       target: { value: 'First prompt' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     expect(await screen.findByText('First chat response.')).toBeInTheDocument();
 
@@ -605,7 +606,7 @@ describe('Assistant modal integration', () => {
     fireEvent.change(screen.getByLabelText('Assistant message'), {
       target: { value: 'Second prompt' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     expect(await screen.findByText('Second chat response.')).toBeInTheDocument();
 
@@ -702,7 +703,7 @@ describe('Assistant modal integration', () => {
     fireEvent.change(screen.getByLabelText('Assistant message'), {
       target: { value: 'Prompt before switch' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     const firstRequest = fetchMock.mock.calls[0];
     const firstBody = JSON.parse(
@@ -728,7 +729,7 @@ describe('Assistant modal integration', () => {
     fireEvent.change(screen.getByLabelText('Assistant message'), {
       target: { value: 'Prompt after switch' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     expect(await screen.findByText('Fresh response after user switch.')).toBeInTheDocument();
 
