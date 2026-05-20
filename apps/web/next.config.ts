@@ -3,13 +3,14 @@ import { withSentryConfig } from '@sentry/nextjs';
 
 const defaultApiProxyTarget = 'http://Shoppi-ApiSe-vxdBwFgRxFe9-1262418963.us-east-1.elb.amazonaws.com';
 const apiProxyTarget = (process.env.API_PROXY_TARGET ?? defaultApiProxyTarget).replace(/\/+$/, '');
+const apiProxySourcePrefix = '/backend';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   async rewrites() {
     return [
       {
-        source: '/api/:path*',
+        source: `${apiProxySourcePrefix}/:path*`,
         destination: `${apiProxyTarget}/:path*`,
       },
     ];
