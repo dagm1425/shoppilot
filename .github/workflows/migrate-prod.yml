@@ -1,0 +1,92 @@
+name: Migrate production database
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type migrate-prod to confirm production migration'
+        required: true
+        type: string
+
+concurrency:
+  group: prod-db-migrations
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm migration intent
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "migrate-prod" ]; then
+            echo "Confirmation text mismatch. Re-run with confirm=migrate-prod."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Run prisma migrate deploy inside ECS task
+        run: |
+          set -euo pipefail
+
+          CLUSTER_ARN="$(aws ecs list-clusters --query 'clusterArns[?contains(@, `ShoppilotEcsStack-ShoppilotCluster`)] | [0]' --output text)"
+          if [ -z "$CLUSTER_ARN" ] || [ "$CLUSTER_ARN" = "None" ]; then
+            echo "Could not find ECS cluster for ShoppilotEcsStack."
+            exit 1
+          fi
+
+          API_SERVICE_ARN="$(aws ecs list-services --cluster "$CLUSTER_ARN" --query 'serviceArns[?contains(@, `ApiService`)] | [0]' --output text)"
+          if [ -z "$API_SERVICE_ARN" ] || [ "$API_SERVICE_ARN" = "None" ]; then
+            echo "Could not find ApiService in cluster $CLUSTER_ARN."
+            exit 1
+          fi
+
+          TASK_DEF_ARN="$(aws ecs describe-services --cluster "$CLUSTER_ARN" --services "$API_SERVICE_ARN" --query 'services[0].taskDefinition' --output text)"
+          SUBNETS="$(aws ecs describe-services --cluster "$CLUSTER_ARN" --services "$API_SERVICE_ARN" --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets' --output text)"
+          SGS="$(aws ecs describe-services --cluster "$CLUSTER_ARN" --services "$API_SERVICE_ARN" --query 'services[0].networkConfiguration.awsvpcConfiguration.securityGroups' --output text)"
+
+          SUBNET1="$(echo "$SUBNETS" | awk '{print $1}')"
+          SUBNET2="$(echo "$SUBNETS" | awk '{print $2}')"
+          SG1="$(echo "$SGS" | awk '{print $1}')"
+
+          if [ -z "$SUBNET1" ] || [ -z "$SUBNET2" ] || [ -z "$SG1" ]; then
+            echo "Failed to resolve ECS service network config."
+            exit 1
+          fi
+
+          CMD='cp -asn /app/node_modules/.pnpm/node_modules/* /app/node_modules/ && node /app/node_modules/.pnpm/prisma@6.19.3_typescript@5.9.3/node_modules/prisma/build/index.js migrate deploy --schema /app/packages/db/prisma/schema.prisma'
+          OVERRIDES="$(printf '{"containerOverrides":[{"name":"api","command":["sh","-c","%s"]}]}' "$CMD")"
+
+          TASK_ARN="$(aws ecs run-task \
+            --cluster "$CLUSTER_ARN" \
+            --task-definition "$TASK_DEF_ARN" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1,$SUBNET2],securityGroups=[$SG1],assignPublicIp=DISABLED}" \
+            --overrides "$OVERRIDES" \
+            --query 'tasks[0].taskArn' \
+            --output text)"
+
+          if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ]; then
+            echo "Failed to start migration task."
+            exit 1
+          fi
+
+          echo "Started migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER_ARN" --tasks "$TASK_ARN"
+
+          EXIT_CODE="$(aws ecs describe-tasks --cluster "$CLUSTER_ARN" --tasks "$TASK_ARN" --query 'tasks[0].containers[?name==`api`].exitCode | [0]' --output text)"
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration task failed with exit code: $EXIT_CODE"
+            aws ecs describe-tasks --cluster "$CLUSTER_ARN" --tasks "$TASK_ARN" --query 'tasks[0].{stoppedReason:stoppedReason,containers:containers[].{name:name,exit:exitCode,reason:reason}}'
+            exit 1
+          fi
+
+          echo "Production migrations applied successfully."

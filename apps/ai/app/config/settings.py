@@ -7,10 +7,13 @@ from pathlib import Path
 from pydantic import AliasChoices, AnyHttpUrl, Field, PrivateAttr, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_NODE_ENV = os.getenv('NODE_ENV', '').strip().lower()
+_ENV_FILE = None if _NODE_ENV == 'production' else '.env'
+
 
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file='.env',
+        env_file=_ENV_FILE,
         env_file_encoding='utf-8',
         case_sensitive=True,
         extra='ignore',
@@ -195,6 +198,22 @@ class AppSettings(BaseSettings):
 
         self.llm_synthesis_provider = provider
         self._llm_synthesis_uses_deprecated_openai_aliases = _uses_deprecated_openai_synthesis_aliases()
+        return self
+
+    @model_validator(mode='after')
+    def validate_production_llm_endpoint_consistency(self) -> 'AppSettings':
+        if self.node_env.strip().lower() != 'production':
+            return self
+
+        base_url = str(self.llm_synthesis_base_url).lower()
+        model = self.llm_synthesis_model.strip().lower()
+        if 'api.openai.com' in base_url or model.startswith('gpt-'):
+            raise ValueError(
+                'Invalid production LLM synthesis configuration: provider is "gemini" '
+                'but base URL/model point to OpenAI-compatible values. Set '
+                'LLM_SYNTHESIS_BASE_URL and LLM_SYNTHESIS_MODEL to Gemini values.'
+            )
+
         return self
 
     @property

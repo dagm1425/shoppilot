@@ -1,0 +1,255 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+jobs:
+  bootstrap-infra-and-secrets:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Validate required secret inputs
+        run: |
+          missing=0
+          require_secret() {
+            local name="$1"
+            local value="$2"
+            if [ -z "$value" ]; then
+              echo "Missing required secret: $name"
+              missing=1
+            fi
+          }
+
+          require_secret "WEB_ORIGIN" "${{ secrets.WEB_ORIGIN }}"
+          require_secret "RUNTIME_STRIPE_SECRET_KEY" "${{ secrets.RUNTIME_STRIPE_SECRET_KEY }}"
+          require_secret "RUNTIME_RESEND_API_KEY" "${{ secrets.RUNTIME_RESEND_API_KEY }}"
+          require_secret "RUNTIME_GEMINI_API_KEY" "${{ secrets.RUNTIME_GEMINI_API_KEY }}"
+
+          if [ "$missing" -ne 0 ]; then
+            echo "Set missing secrets in GitHub repository settings, then re-run deploy workflow."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CDK app
+        run: pnpm --filter @shoppilot/cdk build
+
+      - name: Deploy foundational stacks (no ECS services yet)
+        run: |
+          pnpm --filter @shoppilot/cdk exec cdk deploy \
+            ShoppilotVpcStack \
+            ShoppilotEcrStack \
+            ShoppilotRedisStack \
+            ShoppilotRdsStack \
+            ShoppilotEcsStack \
+            --require-approval never \
+            -c deployServices=false \
+            -c webOrigin="${{ secrets.WEB_ORIGIN }}"
+
+      - name: Build runtime connection URLs
+        run: |
+          RDS_SECRET_ARN="$(aws cloudformation describe-stacks --stack-name ShoppilotRdsStack --query "Stacks[0].Outputs[?OutputKey=='DatabaseSecretArn'].OutputValue" --output text)"
+          REDIS_ENDPOINT="$(aws cloudformation describe-stacks --stack-name ShoppilotRedisStack --query "Stacks[0].Outputs[?OutputKey=='RedisEndpoint'].OutputValue" --output text)"
+          REDIS_PORT="$(aws cloudformation describe-stacks --stack-name ShoppilotRedisStack --query "Stacks[0].Outputs[?OutputKey=='RedisPort'].OutputValue" --output text)"
+
+          if [ -z "$RDS_SECRET_ARN" ] || [ "$RDS_SECRET_ARN" = "None" ]; then
+            echo "Failed to resolve RDS secret ARN from ShoppilotRdsStack outputs."
+            exit 1
+          fi
+
+          if [ -z "$REDIS_ENDPOINT" ] || [ "$REDIS_ENDPOINT" = "None" ] || [ -z "$REDIS_PORT" ] || [ "$REDIS_PORT" = "None" ]; then
+            echo "Failed to resolve Redis endpoint/port from ShoppilotRedisStack outputs."
+            exit 1
+          fi
+
+          RDS_SECRET_JSON="$(aws secretsmanager get-secret-value --secret-id "$RDS_SECRET_ARN" --query SecretString --output text)"
+
+          DATABASE_URL="$(node -e "const s = JSON.parse(process.argv[1]); const u = encodeURIComponent(s.username ?? ''); const p = encodeURIComponent(s.password ?? ''); const h = s.host ?? ''; const port = s.port ?? 5432; const db = s.dbname ?? 'shoppilot'; if (!u || !p || !h) process.exit(1); process.stdout.write(\`postgresql://\${u}:\${p}@\${h}:\${port}/\${db}\`);" "$RDS_SECRET_JSON")"
+          REDIS_URL="redis://${REDIS_ENDPOINT}:${REDIS_PORT}"
+
+          echo "::add-mask::$DATABASE_URL"
+          echo "::add-mask::$REDIS_URL"
+
+          {
+            echo "DATABASE_URL<<EOF"
+            echo "$DATABASE_URL"
+            echo "EOF"
+            echo "REDIS_URL<<EOF"
+            echo "$REDIS_URL"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Create or update runtime secrets in Secrets Manager
+        run: |
+          JWT_SECRET="${{ secrets.RUNTIME_JWT_SECRET }}"
+          if [ -z "$JWT_SECRET" ]; then
+            JWT_SECRET="$(openssl rand -hex 32)"
+          fi
+
+          echo "::add-mask::$JWT_SECRET"
+          echo "::add-mask::${{ secrets.RUNTIME_STRIPE_SECRET_KEY }}"
+          echo "::add-mask::${{ secrets.RUNTIME_RESEND_API_KEY }}"
+          echo "::add-mask::${{ secrets.RUNTIME_GEMINI_API_KEY }}"
+
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const apiSecret = {
+            DATABASE_URL: process.env.DATABASE_URL,
+            REDIS_URL: process.env.REDIS_URL,
+            JWT_SECRET: process.env.JWT_SECRET,
+            STRIPE_SECRET_KEY: process.env.RUNTIME_STRIPE_SECRET_KEY,
+            RESEND_API_KEY: process.env.RUNTIME_RESEND_API_KEY,
+          };
+
+          const aiSecret = {
+            DATABASE_URL: process.env.DATABASE_URL,
+            GEMINI_API_KEY: process.env.RUNTIME_GEMINI_API_KEY,
+          };
+
+          fs.writeFileSync('api-runtime-secret.json', JSON.stringify(apiSecret));
+          fs.writeFileSync('ai-runtime-secret.json', JSON.stringify(aiSecret));
+          NODE
+
+          upsert_secret() {
+            local secret_name="$1"
+            local file_path="$2"
+
+            if aws secretsmanager describe-secret --secret-id "$secret_name" >/dev/null 2>&1; then
+              aws secretsmanager put-secret-value \
+                --secret-id "$secret_name" \
+                --secret-string "file://$file_path" >/dev/null
+              echo "Updated secret: $secret_name"
+            else
+              aws secretsmanager create-secret \
+                --name "$secret_name" \
+                --secret-string "file://$file_path" >/dev/null
+              echo "Created secret: $secret_name"
+            fi
+          }
+
+          upsert_secret /shoppilot/prod/api api-runtime-secret.json
+          upsert_secret /shoppilot/prod/ai ai-runtime-secret.json
+        env:
+          JWT_SECRET: ${{ secrets.RUNTIME_JWT_SECRET }}
+          RUNTIME_STRIPE_SECRET_KEY: ${{ secrets.RUNTIME_STRIPE_SECRET_KEY }}
+          RUNTIME_RESEND_API_KEY: ${{ secrets.RUNTIME_RESEND_API_KEY }}
+          RUNTIME_GEMINI_API_KEY: ${{ secrets.RUNTIME_GEMINI_API_KEY }}
+
+  build-and-push:
+    needs: bootstrap-infra-and-secrets
+    runs-on: ubuntu-latest
+    outputs:
+      image_api: ${{ steps.images.outputs.image_api }}
+      image_ai: ${{ steps.images.outputs.image_ai }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region "${{ secrets.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "${{ secrets.ECR_REGISTRY }}"
+
+      - name: Build and push backend images
+        run: |
+          API_IMAGE="${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPO_API }}:${GITHUB_SHA}"
+          AI_IMAGE="${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPO_AI }}:${GITHUB_SHA}"
+
+          docker build -t "$API_IMAGE" -f apps/api/Dockerfile .
+          docker push "$API_IMAGE"
+
+          docker build -t "$AI_IMAGE" -f apps/ai/Dockerfile .
+          docker push "$AI_IMAGE"
+
+      - name: Set outputs
+        id: images
+        run: |
+          echo "image_api=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPO_API }}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_ai=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPO_AI }}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+  cdk-deploy-services:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CDK app
+        run: pnpm --filter @shoppilot/cdk build
+
+      - name: Deploy ECS services
+        run: |
+          pnpm --filter @shoppilot/cdk exec cdk deploy ShoppilotEcsStack \
+            --require-approval never \
+            -c apiImage=${{ needs.build-and-push.outputs.image_api }} \
+            -c aiImage=${{ needs.build-and-push.outputs.image_ai }} \
+            -c webOrigin="${{ secrets.WEB_ORIGIN }}" \
+            -c deployServices=true
+
+      - name: Smoke check API health
+        run: |
+          API_DNS="$(aws cloudformation describe-stacks --stack-name ShoppilotEcsStack --query "Stacks[0].Outputs[?OutputKey=='ApiLoadBalancerDnsName'].OutputValue" --output text)"
+          if [ -z "$API_DNS" ] || [ "$API_DNS" = "None" ]; then
+            echo "Could not resolve API load balancer DNS output."
+            exit 1
+          fi
+
+          curl -Ssf "http://${API_DNS}/health"
+
+      - name: Migration reminder
+        run: |
+          echo "Run .github/workflows/migrate-prod.yml after deploy (confirm=migrate-prod)."

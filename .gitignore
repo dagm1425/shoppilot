@@ -17,3 +17,6 @@ __pycache__/
 .venv/
 apps/ai/.chroma/
 .chroma/
+infra/cdk/cdk.out/
+aws/
+awscliv2.zip

@@ -1,0 +1,19 @@
+name: Deploy smoke test
+on:
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      API_BASE_URL: ${{ secrets.API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Curl health endpoint
+        run: |
+          if [ -z "$API_BASE_URL" ]; then
+            echo "Missing required secret: API_BASE_URL"
+            exit 1
+          fi
+
+          curl -Ssf "${API_BASE_URL%/}/health"
