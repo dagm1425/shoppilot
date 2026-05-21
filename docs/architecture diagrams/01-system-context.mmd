@@ -1,0 +1,43 @@
+flowchart LR
+  shopper[Shopper]
+  admin[Admin]
+
+  web[Web App\nNext.js]
+  api[Core API Gateway\nNestJS]
+  worker[Async Worker\nNestJS + BullMQ]
+  ai[AI Service\nFastAPI + LangGraph]
+
+  pg[(PostgreSQL)]
+  redis[(Redis / BullMQ)]
+  chroma[(Chroma Vector Store)]
+
+  stripe[Stripe\nCheckout + Webhooks]
+  resend[Resend\nEmail Delivery]
+  s3[S3\nProduct Media]
+  gemini[Gemini APIs\nLLM + Embeddings]
+  sentry[Sentry]
+  langsmith[LangSmith]
+
+  shopper -->|browse, cart, checkout, assistant chat| web
+  admin -->|admin dashboard + product management| web
+  web -->|REST + SSE| api
+
+  api -->|proxy AI chat/stream| ai
+  api -->|domain reads/writes| pg
+  api -->|enqueue jobs| redis
+  worker -->|consume jobs| redis
+  worker -->|read order snapshot| pg
+  worker -->|send order confirmation| resend
+
+  api -->|create/retrieve checkout sessions| stripe
+  stripe -->|payment webhooks| api
+  api -->|presign + media metadata| s3
+
+  ai -->|catalog retrieval| pg
+  ai -->|semantic retrieval index| chroma
+  ai -->|planner/synthesis/embeddings| gemini
+
+  web -.->|frontend errors/traces| sentry
+  api -.->|backend errors/traces| sentry
+  ai -.->|service errors/traces| sentry
+  ai -.->|graph traces| langsmith

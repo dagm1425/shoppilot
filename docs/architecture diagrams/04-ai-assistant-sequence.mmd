@@ -1,0 +1,40 @@
+sequenceDiagram
+  autonumber
+
+  participant U as Shopper
+  participant W as Web (Assistant Widget)
+  participant A as Core API Gateway (NestJS)
+  participant AI as AI Service (FastAPI)
+  participant G as LangGraph Workflow
+  participant GM as Gemini APIs
+  participant T as Assistant Tools
+  participant PG as PostgreSQL
+  participant CH as Chroma
+
+  U->>W: Ask assistant question
+  W->>A: POST /ai/chat/stream (SSE)
+  A->>A: Optional JWT + throttling + request/run IDs
+  A->>AI: Proxy request to /ai/chat/stream
+
+  AI->>G: Run workflow (threaded state)
+  G->>GM: Query updater + planner call
+  GM-->>G: retrievalMode + normalized filters + semanticQuery
+
+  G->>T: search_items(query, mode, filters)
+  T->>GM: Embed semantic query
+  GM-->>T: embedding vector
+  T->>PG: Structured candidate query
+  T->>CH: Vector similarity query
+  T-->>G: ranked products + retrieval metadata
+
+  G->>GM: Synthesize assistant response JSON
+  alt Synthesis succeeds
+    GM-->>G: assistantMessage + prompts + token usage
+  else Planner/synthesis failure
+    G->>G: Deterministic fallback messaging
+  end
+
+  G-->>AI: Final state snapshot + telemetry
+  AI-->>A: SSE event stream
+  A-->>W: Pass-through SSE + telemetry headers
+  W-->>U: Streaming answer + recommended products

@@ -1,0 +1,47 @@
+sequenceDiagram
+  autonumber
+
+  participant U as Shopper
+  participant W as Web (Next.js)
+  participant A as Core API (NestJS)
+  participant S as Stripe
+  participant DB as PostgreSQL
+  participant R as Redis Queue
+  participant WK as Worker (NestJS)
+  participant E as Resend
+
+  U->>W: Start checkout
+  W->>A: POST /checkout/session
+  A->>DB: Validate cart + create/reuse checkout session
+  A-->>W: sessionToken + pricing + readiness
+
+  U->>W: Submit address/contact + Pay now
+  W->>A: POST /checkout/session/:token/payment
+  A->>S: Create hosted checkout session
+  S-->>A: providerSessionId + checkoutUrl
+  A-->>W: checkoutUrl
+  W->>S: Redirect to hosted checkout
+
+  S-->>A: POST /webhooks/stripe (checkout.session.*)
+  A->>DB: Upsert webhook event + claim processing lock
+  A->>DB: Reconcile by providerSessionId
+  alt Payment paid
+    A->>DB: Transaction: create order, line items, decrement stock, clear cart
+    A->>R: Enqueue SEND_ORDER_CONFIRMATION job
+  else Not paid / terminal failure
+    A->>DB: Mark waiting/canceled/failed state
+  end
+
+  par Return-flow finalization
+    W->>A: GET /checkout/session/:token/payment-status
+    A->>S: Retrieve checkout session status
+    A-->>W: paid/open/canceled/expired
+    W->>A: POST /checkout/place-order (idempotencyKey)
+    A-->>W: orderNumber
+  and Async email delivery
+    WK->>R: Consume SEND_ORDER_CONFIRMATION job
+    WK->>DB: Read order snapshot
+    WK->>E: Send order confirmation email
+  end
+
+  W-->>U: Redirect to /orders/:orderNumber

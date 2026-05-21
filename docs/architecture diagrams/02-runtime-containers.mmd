@@ -1,0 +1,79 @@
+flowchart TB
+  subgraph client["Client"]
+    browser["Browser Session"]
+  end
+
+  subgraph web_runtime["Web Runtime (Next.js)"]
+    ui["App Router UI"]
+    assistant_ui["Assistant Widget\n@assistant-ui/react"]
+    api_clients["Typed Fetch Clients"]
+    ui_stores["Zustand UI Stores"]
+  end
+
+  subgraph api_runtime["Core API Runtime (NestJS)"]
+    controllers["Controllers + Guards + Error Filter"]
+    auth_mod["Auth Module\n(JWT cookie strategy)"]
+    commerce_mod["Catalog/Cart/Wishlist/Address/Orders Modules"]
+    checkout_mod["Checkout Module\n(Stripe session + order finalization)"]
+    ai_proxy["AI Gateway Module\n(rate limit + proxy + SSE passthrough)"]
+    webhooks_mod["Stripe Webhooks Module"]
+  end
+
+  subgraph worker_runtime["Worker Runtime (NestJS Context)"]
+    worker_boot["Worker Bootstrap"]
+    email_processor["Order Confirmation Processor"]
+  end
+
+  subgraph ai_runtime["AI Runtime (FastAPI)"]
+    ai_routes["/ai/chat + /ai/chat/stream"]
+    workflow_graph["LangGraph Workflow\n(query planning -> retrieval -> final response)"]
+    tools["Search/Compare/Details Tools"]
+  end
+
+  subgraph data_stores["State + Data Stores"]
+    pg["PostgreSQL"]
+    redis["Redis (BullMQ)"]
+    chroma["Chroma Persistent Collection"]
+  end
+
+  subgraph external["External Services"]
+    stripe["Stripe"]
+    resend["Resend"]
+    s3["S3"]
+    gemini["Gemini APIs"]
+  end
+
+  browser --> ui
+  browser --> assistant_ui
+  ui --> ui_stores
+  ui --> api_clients
+  assistant_ui --> api_clients
+  api_clients --> controllers
+
+  controllers --> auth_mod
+  controllers --> commerce_mod
+  controllers --> checkout_mod
+  controllers --> ai_proxy
+  controllers --> webhooks_mod
+
+  commerce_mod --> pg
+  checkout_mod --> pg
+  webhooks_mod --> pg
+  ai_proxy --> ai_routes
+
+  checkout_mod --> stripe
+  webhooks_mod --> stripe
+  checkout_mod --> redis
+  controllers --> s3
+
+  worker_boot --> email_processor
+  email_processor --> redis
+  email_processor --> pg
+  email_processor --> resend
+
+  ai_routes --> workflow_graph
+  workflow_graph --> tools
+  tools --> pg
+  tools --> chroma
+  workflow_graph --> gemini
+  tools --> gemini

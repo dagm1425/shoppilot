@@ -1,0 +1,122 @@
+erDiagram
+  USER {
+    string id PK
+    string email
+    string username
+    string role
+    int session_version
+    datetime created_at
+  }
+
+  PRODUCT {
+    string id PK
+    string slug UK
+    string name
+    string category
+    string gender
+    string thermal_profile
+    int price_cents
+    bool available
+    int stock
+  }
+
+  CART {
+    string id PK
+    string user_id FK
+    datetime updated_at
+  }
+
+  CART_ITEM {
+    string id PK
+    string cart_id FK
+    string product_id FK
+    string size
+    int quantity
+  }
+
+  WISHLIST {
+    string id PK
+    string user_id FK
+    datetime updated_at
+  }
+
+  WISHLIST_ITEM {
+    string id PK
+    string wishlist_id FK
+    string product_id FK
+  }
+
+  ADDRESS {
+    string id PK
+    string user_id FK
+    string recipient_name
+    string country
+    string city
+    string postal_code
+    bool is_default
+  }
+
+  CHECKOUT_SESSION {
+    string id PK
+    string token UK
+    string user_id FK
+    string cart_id FK
+    string selected_address_id FK
+    string payment_provider_session_id
+    bool is_active
+    datetime expires_at
+  }
+
+  ORDER {
+    string id PK
+    string order_number UK
+    string user_id FK
+    string checkout_session_id FK
+    string place_order_idempotency_key
+    string status
+    int total_cents
+    datetime paid_at
+  }
+
+  ORDER_LINE_ITEM {
+    string id PK
+    string order_id FK
+    string product_id FK
+    string product_name
+    string product_size
+    int quantity
+    int line_subtotal_cents
+  }
+
+  PAYMENT_WEBHOOK_EVENT {
+    string id PK
+    string event_id UK
+    string event_type
+    string provider_session_id
+    string checkout_session_id FK
+    string order_id FK
+    string status
+    datetime received_at
+  }
+
+  USER ||--o| CART : owns
+  CART ||--o{ CART_ITEM : contains
+  PRODUCT ||--o{ CART_ITEM : referenced_by
+
+  USER ||--o| WISHLIST : owns
+  WISHLIST ||--o{ WISHLIST_ITEM : contains
+  PRODUCT ||--o{ WISHLIST_ITEM : referenced_by
+
+  USER ||--o{ ADDRESS : saves
+
+  USER ||--o{ CHECKOUT_SESSION : starts
+  CART ||--o{ CHECKOUT_SESSION : snapshots
+  ADDRESS o|--o{ CHECKOUT_SESSION : selected_for
+
+  USER ||--o{ ORDER : places
+  CHECKOUT_SESSION ||--o| ORDER : finalizes_into
+  ORDER ||--o{ ORDER_LINE_ITEM : contains
+  PRODUCT o|--o{ ORDER_LINE_ITEM : captured_as
+
+  PAYMENT_WEBHOOK_EVENT }o--|| CHECKOUT_SESSION : reconciles
+  PAYMENT_WEBHOOK_EVENT }o--o| ORDER : updates_state
