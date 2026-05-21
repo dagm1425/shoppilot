@@ -166,6 +166,11 @@ pnpm --filter @shoppilot/api start:worker
 - Core API health: `http://localhost:4000/health`
 - AI health: `http://localhost:8000/health`
 
+## Demo
+- Production app: `https://shoppilot-web.vercel.app/catalog`
+- [Main flow](https://drive.google.com/file/d/1IJVy35tNnvwnODiIxD1wFDJQebCMFVUY/view?usp=sharing)
+- [Follow up prompts: refinment and comparision](https://drive.google.com/file/d/1DTK_k5pTNI3GjkldyRsfHTdpw2SFNmVe/view?usp=sharing)
+
 ## Workspace Commands
 - `pnpm dev` - run workspace apps in watch mode
 - `pnpm build` - build all workspaces
