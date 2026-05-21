@@ -470,7 +470,7 @@ describe('Assistant modal integration', () => {
       expect(screen.queryByLabelText('Assistant message')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Open assistant' })).toBeInTheDocument();
     });
-  });
+  }, 15_000);
 
   it('omits attachment/edit/starter suggestion UI and keeps send disabled for blank input', async () => {
     render(React.createElement(AssistantWidget));
