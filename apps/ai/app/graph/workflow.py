@@ -33,12 +33,8 @@ from app.schemas import (
 )
 from app.search.query_intent import parse_intent
 from app.search.refinement import (
-    apply_filter_refinement,
-    build_merged_semantic_query,
     detect_filter_clears,
     detect_reset_requested,
-    extract_semantic_constraints,
-    merge_semantic_constraints,
 )
 from app.tools import AssistantTools
 
@@ -299,24 +295,39 @@ class AssistantGraphWorkflow:
         _log_node_entered(state, node='query_planning')
         lowered_query = state['query'].lower()
         prior_recommended_ids = list(state.get('recommended_product_ids', []))
+        prior_semantic_query = (
+            str(state.get('merged_semantic_query') or state.get('semantic_query') or '')
+            .strip()
+        )
+        prior_comparison_requested = bool(state.get('comparison_requested', False))
+        normalized_filters = state.get('normalized_filters', {})
         has_memory_context = (
-            'normalized_filters' in state
-            or 'semantic_facets' in state
-            or 'semantic_terms' in state
+            any(
+                normalized_filters.get(key) is not None
+                for key in (
+                    'category',
+                    'gender',
+                    'thermalProfile',
+                    'priceMinCents',
+                    'priceMaxCents',
+                    'availability',
+                    'minRating',
+                )
+            )
+            or prior_semantic_query != ''
+            or prior_comparison_requested
             or len(prior_recommended_ids) > 0
         )
 
-        prior_filters: dict[str, Any] = {}
-        if has_memory_context:
-            prior_filters = {
-                'category': state.get('normalized_filters', {}).get('category'),
-                'gender': state.get('normalized_filters', {}).get('gender'),
-                'thermalProfile': state.get('normalized_filters', {}).get('thermalProfile'),
-                'priceMinCents': state.get('normalized_filters', {}).get('priceMinCents'),
-                'priceMaxCents': state.get('normalized_filters', {}).get('priceMaxCents'),
-                'availability': state.get('normalized_filters', {}).get('availability'),
-                'minRating': state.get('normalized_filters', {}).get('minRating'),
-            }
+        prior_filters: dict[str, Any] = {
+            'category': normalized_filters.get('category'),
+            'gender': normalized_filters.get('gender'),
+            'thermalProfile': normalized_filters.get('thermalProfile'),
+            'priceMinCents': normalized_filters.get('priceMinCents'),
+            'priceMaxCents': normalized_filters.get('priceMaxCents'),
+            'availability': normalized_filters.get('availability'),
+            'minRating': normalized_filters.get('minRating'),
+        }
 
         planner_state = self._plan_query_with_llm(
             state=state,
@@ -328,20 +339,14 @@ class AssistantGraphWorkflow:
         if planner_state is not None:
             return planner_state
 
+        # TODO(remove): fallback-only deterministic planning branch.
+        # Primary path is LLM planner (`_plan_query_with_llm`). Keep this only as
+        # a safety path until planner reliability is accepted for full cutover.
         intent = parse_intent(state['query'])
         reset_requested = detect_reset_requested(state['query'])
         clear_fields = detect_filter_clears(state['query'])
 
-        current_facets, current_terms = extract_semantic_constraints(state['query'])
-        semantic_merge = merge_semantic_constraints(
-            prior_facets=state.get('semantic_facets', {}),
-            prior_terms=state.get('semantic_terms', []),
-            current_facets=current_facets,
-            current_terms=current_terms,
-            reset_requested=reset_requested,
-        )
-
-        explicit_filters = {
+        explicit_filters: dict[str, Any] = {
             'category': intent.filters.category,
             'gender': intent.filters.gender,
             'thermalProfile': intent.filters.thermal_profile,
@@ -350,32 +355,61 @@ class AssistantGraphWorkflow:
             'availability': intent.filters.availability,
             'minRating': intent.filters.min_rating,
         }
-        filter_merge = apply_filter_refinement(
-            prior_filters=prior_filters,
-            explicit_filters=explicit_filters,
-            clear_fields=clear_fields,
-            facets=current_facets,
-            has_memory=has_memory_context and not reset_requested,
-        )
-        merged_semantic_query = build_merged_semantic_query(
-            facets=semantic_merge.facets,
-            terms=semantic_merge.terms,
-            fallback_query=intent.semantic_query,
-        )
+        merged_filters: dict[str, Any] = {
+            key: (
+                explicit_filters.get(key)
+                if explicit_filters.get(key) is not None
+                else (
+                    prior_filters.get(key)
+                    if has_memory_context and not reset_requested
+                    else None
+                )
+            )
+            for key in (
+                'category',
+                'gender',
+                'thermalProfile',
+                'priceMinCents',
+                'priceMaxCents',
+                'availability',
+                'minRating',
+            )
+        }
+        for clear_field in clear_fields:
+            merged_filters[clear_field] = None
+
+        merged_semantic_query = intent.semantic_query.strip()
+        if reset_requested:
+            merged_semantic_query = ''
         merged_semantic_query = _sanitize_fallback_semantic_query(
             semantic_query=merged_semantic_query,
-            normalized_filters=filter_merge.filters,
+            normalized_filters=merged_filters,
         )
 
         comparison_requested = any(
             token in lowered_query
             for token in ('compare', 'comparison', 'versus', 'vs ')
         )
+        changed_filter_keys = {
+            key
+            for key in (
+                'category',
+                'gender',
+                'thermalProfile',
+                'priceMinCents',
+                'priceMaxCents',
+                'availability',
+                'minRating',
+            )
+            if merged_filters.get(key) != prior_filters.get(key)
+        }
+        semantic_changed = merged_semantic_query != prior_semantic_query
+        comparison_changed = comparison_requested != prior_comparison_requested
         refinement_delta = (
             reset_requested
-            or len(filter_merge.changed_filter_keys) > 0
-            or len(semantic_merge.changed_facet_groups) > 0
-            or semantic_merge.terms_changed
+            or len(changed_filter_keys) > 0
+            or semantic_changed
+            or comparison_changed
             or len(clear_fields) > 0
         )
         skip_retrieval = (
@@ -384,9 +418,8 @@ class AssistantGraphWorkflow:
             and not refinement_delta
         )
 
-        normalized_filters = filter_merge.filters
         retrieval_mode = _derive_retrieval_mode(
-            normalized_filters=normalized_filters,
+            normalized_filters=merged_filters,
             semantic_query=merged_semantic_query,
         )
 
@@ -406,9 +439,10 @@ class AssistantGraphWorkflow:
                 'request_id': state['request_id'],
                 'run_id': state['run_id'],
                 'thread_id': state['thread_id'],
-                'changed_filter_keys': sorted(filter_merge.changed_filter_keys),
-                'changed_facet_groups': sorted(semantic_merge.changed_facet_groups),
-                'implicit_filter_keys': sorted(filter_merge.implicit_filter_keys),
+                'changed_filter_keys': sorted(changed_filter_keys),
+                'changed_facet_groups': [],
+                'implicit_filter_keys': [],
+                'semantic_changed': semantic_changed,
                 'compare_only': skip_retrieval,
                 'ai_retrieval_mode': retrieval_mode,
             },
@@ -432,10 +466,10 @@ class AssistantGraphWorkflow:
         return {
             'semantic_query': merged_semantic_query,
             'merged_semantic_query': merged_semantic_query,
-            'semantic_facets': semantic_merge.facets,
-            'semantic_terms': semantic_merge.terms,
+            'semantic_facets': {},
+            'semantic_terms': [],
             'retrieval_mode': retrieval_mode,
-            'normalized_filters': normalized_filters,
+            'normalized_filters': merged_filters,
             'comparison_requested': comparison_requested,
             'prior_recommended_product_ids': prior_recommended_ids,
             'skip_retrieval': skip_retrieval,
@@ -565,29 +599,10 @@ class AssistantGraphWorkflow:
         for clear_field in planner_result.clear_fields:
             merged_filters[clear_field] = None
 
-        # Deterministic availability safety:
-        # if planner returns null availability while prior availability exists and the
-        # current turn did not explicitly clear/change availability, carry prior value.
-        availability_directive = _detect_availability_directive(lowered_query)
-        if availability_directive == 'set_true':
-            merged_filters['availability'] = True
-        elif availability_directive == 'set_false':
-            merged_filters['availability'] = False
-        elif availability_directive == 'clear':
-            merged_filters['availability'] = None
-        elif (
-            not planner_result.reset_requested
-            and 'availability' not in planner_result.clear_fields
-            and merged_filters.get('availability') is None
-            and prior_filters.get('availability') is not None
-        ):
-            merged_filters['availability'] = bool(prior_filters.get('availability'))
-
         semantic_query = planner_result.semantic_query.strip()
         if planner_result.retrieval_mode == 'semantic' and semantic_query == '':
             raise ValueError('Planner returned semantic mode with empty semantic query.')
 
-        current_facets, current_terms = extract_semantic_constraints(semantic_query)
         comparison_requested = planner_result.comparison_requested or any(
             token in lowered_query
             for token in ('compare', 'comparison', 'versus', 'vs ')
@@ -670,8 +685,8 @@ class AssistantGraphWorkflow:
         return {
             'semantic_query': semantic_query,
             'merged_semantic_query': semantic_query,
-            'semantic_facets': current_facets,
-            'semantic_terms': current_terms,
+            'semantic_facets': {},
+            'semantic_terms': [],
             'retrieval_mode': planner_result.retrieval_mode,
             'normalized_filters': merged_filters,
             'comparison_requested': comparison_requested,
@@ -730,6 +745,10 @@ class AssistantGraphWorkflow:
                     'minRating': state.get('normalized_filters', {}).get('minRating'),
                 }
             )
+            # TODO(remove): downstream `AssistantTools.search_items` still reparses
+            # `payload.query` and may backfill missing filters from text. With the
+            # current planner-first workflow, this duplicates planning and can drift
+            # from `normalized_filters` decided upstream.
             tool_output = self._tools.search_items(tool_input)
         except ValidationError as exc:
             logger.warning(
@@ -1190,31 +1209,6 @@ def _sanitize_fallback_semantic_query(
         return ''
 
     return query
-
-
-def _detect_availability_directive(lowered_query: str) -> str:
-    if any(
-        phrase in lowered_query
-        for phrase in (
-            'any availability',
-            'ignore stock',
-            'ignore availability',
-            'any stock',
-            'either in stock or out of stock',
-        )
-    ):
-        return 'clear'
-
-    if 'out of stock' in lowered_query or 'unavailable' in lowered_query:
-        return 'set_false'
-
-    if 'in stock' in lowered_query or 'available now' in lowered_query:
-        return 'set_true'
-
-    if ' available ' in f' {lowered_query} ':
-        return 'set_true'
-
-    return 'none'
 
 
 def _route_after_validation(state: AssistantGraphState) -> Literal['retry_route', 'no_result', 'final_response']:
