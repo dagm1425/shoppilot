@@ -6,7 +6,7 @@ from typing import Any, Literal
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 PlannerClearField = Literal[
     'category',
@@ -33,60 +33,6 @@ class _PlannerFilters(BaseModel):
     price_max_cents: int | None = Field(default=None, ge=0, alias='priceMaxCents')
     availability: bool | None = None
     min_rating: float | None = Field(default=None, ge=0, le=5, alias='minRating')
-
-    @field_validator('category')
-    @classmethod
-    def normalize_category(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip().lower()
-        if normalized == '':
-            return None
-        if normalized not in {'tops', 'bottoms'}:
-            raise ValueError('category must be "tops" or "bottoms" when provided.')
-        return normalized
-
-    @field_validator('gender')
-    @classmethod
-    def normalize_gender(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip().lower()
-        if normalized == '':
-            return None
-        if normalized in {'men', 'male', 'mens'}:
-            return 'men'
-        if normalized in {'women', 'female', 'womens'}:
-            return 'women'
-        if normalized == 'unisex':
-            return 'unisex'
-        raise ValueError('gender must be one of: men, women, unisex.')
-
-    @field_validator('thermal_profile')
-    @classmethod
-    def normalize_thermal_profile(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip().lower()
-        if normalized == '':
-            return None
-        if normalized in {'hot_weather', 'hot-weather', 'hot weather'}:
-            return 'hot_weather'
-        if normalized in {'cold_weather', 'cold-weather', 'cold weather'}:
-            return 'cold_weather'
-        if normalized in {'all_season', 'all-season', 'all season'}:
-            return 'all_season'
-        raise ValueError('thermalProfile must be one of: hot_weather, cold_weather, all_season.')
-
-    @model_validator(mode='after')
-    def validate_price_range(self) -> '_PlannerFilters':
-        if (
-            self.price_min_cents is not None
-            and self.price_max_cents is not None
-            and self.price_min_cents > self.price_max_cents
-        ):
-            raise ValueError('priceMinCents must be <= priceMaxCents.')
-        return self
 
 
 class QueryPlannerOutput(BaseModel):
