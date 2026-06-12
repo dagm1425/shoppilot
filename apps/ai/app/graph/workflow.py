@@ -89,6 +89,7 @@ _FALLBACK_SEMANTIC_NOISE_TOKENS = {
 
 class AssistantGraphState(TypedDict, total=False):
     query: str
+    resolved_request: str
     request_id: str
     run_id: str
     session_id: str
@@ -463,6 +464,10 @@ class AssistantGraphWorkflow:
             prior_recommended_ids = []
 
         return {
+            'resolved_request': _build_resolved_request(
+                normalized_filters=merged_filters,
+                semantic_query=merged_semantic_query,
+            ),
             'semantic_query': merged_semantic_query,
             'merged_semantic_query': merged_semantic_query,
             'semantic_facets': {},
@@ -680,6 +685,10 @@ class AssistantGraphWorkflow:
         )
 
         return {
+            'resolved_request': _build_resolved_request(
+                normalized_filters=merged_filters,
+                semantic_query=semantic_query,
+            ),
             'semantic_query': semantic_query,
             'merged_semantic_query': semantic_query,
             'semantic_facets': {},
@@ -912,6 +921,10 @@ class AssistantGraphWorkflow:
         _log_node_entered(state, node='final_response')
         retrieved_products = list(state.get('retrieved_products', []))
         recommended_ids = list(state.get('recommended_product_ids', []))
+        resolved_request = str(state.get('resolved_request') or '').strip() or _build_resolved_request(
+            normalized_filters=state.get('normalized_filters', {}),
+            semantic_query=str(state.get('semantic_query') or ''),
+        )
 
         if len(retrieved_products) == 0 and recommended_ids:
             hydrated_products: list[dict[str, Any]] = []
@@ -1057,7 +1070,7 @@ class AssistantGraphWorkflow:
 
             try:
                 synthesis = self._synthesizer.synthesize(
-                    query=state['query'],
+                    resolved_request=resolved_request,
                     retrieval_mode=state.get('retrieval_mode'),
                     normalized_filters=state.get('normalized_filters', {}),
                     retrieved_products=retrieved_products,
@@ -1171,6 +1184,66 @@ def _derive_retrieval_mode(
     if has_filters:
         return 'structured'
     return 'semantic'
+
+
+def _build_resolved_request(
+    *,
+    normalized_filters: dict[str, Any],
+    semantic_query: str,
+) -> str:
+    parts: list[str] = ['recommend']
+
+    semantic = semantic_query.strip()
+    if semantic != '':
+        parts.append(semantic)
+
+    gender = normalized_filters.get('gender')
+    if isinstance(gender, str) and gender.strip() != '':
+        parts.append(gender.strip())
+
+    thermal_profile = normalized_filters.get('thermalProfile')
+    if thermal_profile == 'hot_weather':
+        parts.append('hot-weather')
+    elif thermal_profile == 'cold_weather':
+        parts.append('cold-weather')
+    elif thermal_profile == 'all_season':
+        parts.append('all-season')
+
+    category = normalized_filters.get('category')
+    has_category = isinstance(category, str) and category.strip() != ''
+    if has_category:
+        parts.append(category.strip())
+    else:
+        parts.append('products')
+
+    price_min_cents = normalized_filters.get('priceMinCents')
+    price_max_cents = normalized_filters.get('priceMaxCents')
+    if isinstance(price_min_cents, int) and isinstance(price_max_cents, int):
+        parts.append(f'{_format_price_dollars(price_min_cents)} to {_format_price_dollars(price_max_cents)}')
+    elif isinstance(price_min_cents, int):
+        parts.append(f'over {_format_price_dollars(price_min_cents)}')
+    elif isinstance(price_max_cents, int):
+        parts.append(f'under {_format_price_dollars(price_max_cents)}')
+
+    availability = normalized_filters.get('availability')
+    if availability is True:
+        parts.append('in stock')
+    elif availability is False:
+        parts.append('out of stock')
+
+    min_rating = normalized_filters.get('minRating')
+    if isinstance(min_rating, (int, float)):
+        parts.append(f'rated {min_rating:g}+')
+
+    resolved = ' '.join(part for part in parts if part.strip() != '').strip()
+    return resolved or 'recommend products'
+
+
+def _format_price_dollars(cents: int) -> str:
+    dollars = cents / 100
+    if cents % 100 == 0:
+        return f'${int(dollars)}'
+    return f'${dollars:.2f}'
 
 
 def _sanitize_fallback_semantic_query(

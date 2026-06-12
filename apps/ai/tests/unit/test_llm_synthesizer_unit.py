@@ -76,7 +76,7 @@ def test_synthesizer_accepts_valid_json_and_sanitizes_prompts() -> None:
     )
 
     result = synthesizer.synthesize(
-        query='show workout tops',
+        resolved_request='recommend workout tops',
         retrieval_mode='structured',
         normalized_filters={'category': 'tops'},
         retrieved_products=_retrieved_products(),
@@ -102,7 +102,7 @@ def test_synthesizer_raises_on_invalid_json_output() -> None:
 
     with pytest.raises(ValueError):
         synthesizer.synthesize(
-            query='show workout tops',
+            resolved_request='recommend workout tops',
             retrieval_mode='structured',
             normalized_filters={'category': 'tops'},
             retrieved_products=_retrieved_products(),
@@ -123,13 +123,14 @@ def test_synthesizer_build_user_prompt_payload_applies_top_n_clamp() -> None:
     )
 
     payload = synthesizer.build_user_prompt_payload(
-        query='show workout tops',
+        resolved_request='recommend workout tops',
         retrieval_mode='structured',
         normalized_filters={'category': 'tops'},
         retrieved_products=_retrieved_products(),
         comparison_summary=None,
     )
 
+    assert payload['resolvedRequest'] == 'recommend workout tops'
     assert payload['retrievalMode'] == 'structured'
     assert len(payload['products']) == 1
     assert payload['products'][0]['productId'] == 'essential-cropped-tee'
@@ -149,7 +150,7 @@ def test_synthesizer_disabled_mode_raises_runtime_error() -> None:
 
     with pytest.raises(RuntimeError, match='disabled'):
         synthesizer.synthesize(
-            query='show workout tops',
+            resolved_request='recommend workout tops',
             retrieval_mode='structured',
             normalized_filters={'category': 'tops'},
             retrieved_products=_retrieved_products(),
@@ -171,7 +172,7 @@ def test_synthesizer_raises_on_empty_model_text() -> None:
 
     with pytest.raises(ValueError, match='empty content'):
         synthesizer.synthesize(
-            query='show workout tops',
+            resolved_request='recommend workout tops',
             retrieval_mode='structured',
             normalized_filters={'category': 'tops'},
             retrieved_products=_retrieved_products(),

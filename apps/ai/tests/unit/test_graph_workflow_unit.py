@@ -79,7 +79,7 @@ class _StubSynthesizer:
     def synthesize(
         self,
         *,
-        query: str,
+        resolved_request: str,
         retrieval_mode: str | None,
         normalized_filters: dict[str, object],
         retrieved_products: list[dict[str, object]],
@@ -87,7 +87,7 @@ class _StubSynthesizer:
     ) -> AssistantSynthesisResult:
         self.calls.append(
             {
-                'query': query,
+                'resolved_request': resolved_request,
                 'retrieval_mode': retrieval_mode,
                 'normalized_filters': normalized_filters,
                 'retrieved_products': retrieved_products,
@@ -473,6 +473,10 @@ def test_workflow_applies_llm_synthesis_when_available() -> None:
         'Want only in-stock picks?',
     ]
     assert len(synthesizer.calls) == 1
+    assert synthesizer.calls[0]['resolved_request'].startswith('recommend ')
+    assert 'tops' in synthesizer.calls[0]['resolved_request']
+    assert 'under $50' in synthesizer.calls[0]['resolved_request']
+    assert 'in stock' in synthesizer.calls[0]['resolved_request']
     assert synthesizer.calls[0]['retrieval_mode'] == 'structured'
 
 

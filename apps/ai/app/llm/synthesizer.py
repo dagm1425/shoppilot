@@ -108,6 +108,7 @@ class AssistantSynthesizer:
         return (
             'You are a synthesis-only assistant for e-commerce recommendations.\n'
             'Use only the provided products and metadata.\n'
+            'resolvedRequest is the authoritative summary of the current request.\n'
             'Do not invent product IDs, names, prices, ratings, or availability.\n'
             'If provided products are empty, return a graceful no-result message and helpful follow-up prompts.\n'
             'Return strict JSON with exactly these keys: assistantMessage, followUpPrompts, comparisonSummary.\n'
@@ -119,14 +120,14 @@ class AssistantSynthesizer:
     def build_user_prompt_payload(
         self,
         *,
-        query: str,
+        resolved_request: str,
         retrieval_mode: str | None,
         normalized_filters: dict[str, Any],
         retrieved_products: list[dict[str, Any]],
         comparison_summary: str | None,
     ) -> dict[str, Any]:
         return {
-            'query': query,
+            'resolvedRequest': resolved_request,
             'retrievalMode': retrieval_mode,
             'normalizedFilters': normalized_filters,
             'products': _trim_products_for_prompt(
@@ -139,7 +140,7 @@ class AssistantSynthesizer:
     def synthesize(
         self,
         *,
-        query: str,
+        resolved_request: str,
         retrieval_mode: str | None,
         normalized_filters: dict[str, Any],
         retrieved_products: list[dict[str, Any]],
@@ -150,7 +151,7 @@ class AssistantSynthesizer:
 
         system_prompt = self.build_system_prompt()
         user_payload = self.build_user_prompt_payload(
-            query=query,
+            resolved_request=resolved_request,
             retrieval_mode=retrieval_mode,
             normalized_filters=normalized_filters,
             retrieved_products=retrieved_products,
