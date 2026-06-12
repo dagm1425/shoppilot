@@ -342,34 +342,6 @@ Final consistency step (mandatory before returning JSON):
             }
         return payload
 
-    # Backward-compatible alias.
-    def build_user_prompt_payload(
-        self,
-        *,
-        query: str,
-        prior_filters: dict[str, Any],
-        prior_semantic_query: str,
-        prior_comparison_requested: bool,
-        prior_reset_requested: bool,
-        has_prior_recommendations: bool,
-    ) -> dict[str, Any]:
-        has_memory_context = (
-            bool(prior_semantic_query.strip())
-            or prior_comparison_requested
-            or prior_reset_requested
-            or has_prior_recommendations
-            or any(value is not None for value in prior_filters.values())
-        )
-        return self.build_planner_prompt_payload(
-            query=query,
-            prior_filters=prior_filters,
-            prior_semantic_query=prior_semantic_query,
-            prior_comparison_requested=prior_comparison_requested,
-            prior_reset_requested=prior_reset_requested,
-            has_prior_recommendations=has_prior_recommendations,
-            has_memory_context=has_memory_context,
-        )
-
     def plan(
         self,
         *,
