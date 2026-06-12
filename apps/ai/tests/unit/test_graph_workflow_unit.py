@@ -114,8 +114,7 @@ class _StubPlanner:
         self.should_raise = should_raise
         self.calls: list[dict[str, object]] = []
         self.last_run_metrics: dict[str, bool] = {
-            'updater_attempted': False,
-            'updater_pass': False,
+            'has_memory_context': False,
             'planner_pass': False,
         }
 
@@ -130,8 +129,13 @@ class _StubPlanner:
         has_prior_recommendations: bool,
     ) -> QueryPlannerOutput:
         self.last_run_metrics = {
-            'updater_attempted': bool(prior_filters) or bool(prior_semantic_query.strip()),
-            'updater_pass': not self.should_raise,
+            'has_memory_context': (
+                bool(prior_filters)
+                or bool(prior_semantic_query.strip())
+                or prior_comparison_requested
+                or prior_reset_requested
+                or has_prior_recommendations
+            ),
             'planner_pass': not self.should_raise,
         }
         self.calls.append(
@@ -287,7 +291,16 @@ def test_workflow_reuses_memory_for_same_thread_compare_follow_up() -> None:
     )
     tools = _StubTools(
         search_plan=[
-            _search_output(retrieval_mode='hybrid', items=[first, second]),
+            _search_output(
+                retrieval_mode='hybrid',
+                items=[first, second],
+                semantic_query='training',
+                normalized_filters=NormalizedFilters(
+                    category='tops',
+                    thermal_profile='hot_weather',
+                    price_max_cents=6000,
+                ),
+            ),
             _search_output(retrieval_mode='hybrid', items=[]),
         ],
         product_map={
@@ -295,9 +308,50 @@ def test_workflow_reuses_memory_for_same_thread_compare_follow_up() -> None:
             second.product_id: second,
         },
     )
+    planner = _StubPlanner(
+        result=[
+            QueryPlannerOutput.model_validate(
+                {
+                    'filters': {
+                        'category': 'tops',
+                        'gender': None,
+                        'thermalProfile': 'hot_weather',
+                        'priceMinCents': None,
+                        'priceMaxCents': 6000,
+                        'availability': None,
+                        'minRating': None,
+                    },
+                    'semanticQuery': 'training',
+                    'retrievalMode': 'hybrid',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': False,
+                }
+            ),
+            QueryPlannerOutput.model_validate(
+                {
+                    'filters': {
+                        'category': 'tops',
+                        'gender': None,
+                        'thermalProfile': 'hot_weather',
+                        'priceMinCents': None,
+                        'priceMaxCents': 6000,
+                        'availability': None,
+                        'minRating': None,
+                    },
+                    'semanticQuery': 'training',
+                    'retrievalMode': 'hybrid',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': True,
+                }
+            ),
+        ],
+    )
     workflow = AssistantGraphWorkflow(
         tools=tools,
         synthesizer=_StubSynthesizer(enabled=False),
+        query_planner=planner,
         model_name='gpt-4.1-mini',
     )
 
@@ -499,9 +553,50 @@ def test_workflow_turn_two_refinement_triggers_fresh_retrieval() -> None:
             second.product_id: second,
         },
     )
+    planner = _StubPlanner(
+        result=[
+            QueryPlannerOutput.model_validate(
+                {
+                    'filters': {
+                        'category': 'tops',
+                        'gender': None,
+                        'thermalProfile': None,
+                        'priceMinCents': None,
+                        'priceMaxCents': 8000,
+                        'availability': True,
+                        'minRating': 4.0,
+                    },
+                    'semanticQuery': '',
+                    'retrievalMode': 'structured',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': False,
+                }
+            ),
+            QueryPlannerOutput.model_validate(
+                {
+                    'filters': {
+                        'category': 'tops',
+                        'gender': 'men',
+                        'thermalProfile': None,
+                        'priceMinCents': 5000,
+                        'priceMaxCents': None,
+                        'availability': True,
+                        'minRating': 4.0,
+                    },
+                    'semanticQuery': '',
+                    'retrievalMode': 'structured',
+                    'resetRequested': False,
+                    'clearFields': [],
+                    'comparisonRequested': False,
+                }
+            ),
+        ],
+    )
     workflow = AssistantGraphWorkflow(
         tools=tools,
         synthesizer=_StubSynthesizer(enabled=False),
+        query_planner=planner,
         model_name='gpt-4.1-mini',
     )
 
@@ -849,7 +944,7 @@ def test_workflow_planner_path_does_not_append_residual_semantic_text() -> None:
     assert tools.search_inputs[1].query == 'cold weather tops'
 
 
-def test_workflow_planner_path_inherits_availability_when_not_explicitly_changed() -> None:
+def test_workflow_planner_path_trusts_planner_availability_value_when_not_explicitly_changed() -> None:
     first = _product(
         product_id='airflow-performance-tee-men',
         name='Airflow Performance Tee',
@@ -951,4 +1046,4 @@ def test_workflow_planner_path_inherits_availability_when_not_explicitly_changed
     )
 
     assert len(tools.search_inputs) == 2
-    assert tools.search_inputs[1].availability is True
+    assert tools.search_inputs[1].availability is None

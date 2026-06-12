@@ -132,8 +132,7 @@ class AssistantQueryPlanner:
         self._provider = provider
         self._enabled = enabled
         self._last_run_metrics: dict[str, bool] = {
-            'updater_attempted': False,
-            'updater_pass': False,
+            'has_memory_context': False,
             'planner_pass': False,
         }
 
@@ -153,65 +152,89 @@ class AssistantQueryPlanner:
     def last_run_metrics(self) -> dict[str, bool]:
         return dict(self._last_run_metrics)
 
-    def build_query_updater_system_prompt(self) -> str:
-        return """
-You rewrite follow-up user queries into a single standalone query for downstream planning.
+    def build_query_planner_system_prompt(self, *, has_memory_context: bool) -> str:
+        if has_memory_context:
+            preamble = """
+You are a strict retrieval planner for an e-commerce assistant handling a follow-up turn.
 
-Return only JSON with these keys:
-- updatedQuery: string
-- resetRequested: boolean
-- comparisonRequested: boolean
+Input contains:
+- the current user query
+- priorState
 
-Rules:
-1. Preserve prior constraints unless user explicitly changes or clears them.
-2. Apply explicit updates from current turn.
-3. If user says reset/start over/new search, or explicitly asks for new recommendations/new products/new options, set resetRequested=true and build query only from current turn.
-4. Do not return markdown, prose, or code fences.
-5. Keep updatedQuery concise and faithful.
-6. Category carry-forward is mandatory unless explicitly changed/cleared:
-   - If priorState.filters.category is set and user does not explicitly change category, keep that category in updatedQuery.
-   - If user explicitly changes category, replace it accordingly.
-   - If user explicitly asks to broaden category (e.g., "any category"), remove category from updatedQuery.
-7. Category lexical mapping (when category words appear in the current turn):
-   - Map to "tops": top/tops, tee/t-shirt/shirt, tank, bra, hoodie, sweater, crewneck, pullover, anorak, baselayer.
-   - Map to "bottoms": bottom/bottoms, short/shorts, jogger/joggers, sweatpant/sweatpants, legging/leggings, pant/pants, track pant.
-   - Emit canonical category token "tops" or "bottoms" in updatedQuery.
-   - Keep specific garment terms in updatedQuery (e.g., "sweater", "hoodie", "tank", "legging") as semantic intent; do not replace with only tops/bottoms.
-8. Do not drop an existing category because of style/context pivots (e.g., "switch to hot weather workouts").
-9. Preserve other active constraints (gender, price, availability, rating, climate) unless explicitly changed/cleared.
-10. Availability carry-forward is mandatory unless explicitly changed/cleared:
-   - Canonical mapping:
-     - "in stock" -> availability=true
-     - "available" / "available now" -> availability=true
-     - "out of stock" / "unavailable" -> availability=false
-   - If priorState.filters.availability is set and user does not explicitly change/clear availability, keep availability wording in updatedQuery.
-   - Clear phrases include: "any availability", "ignore stock", "ignore availability", "either in stock or out of stock", "any stock".
+Your job is to use priorState as the starting state, update it based on the current user query, and return the full next-state JSON object.
+Follow-up state rules:
+1. Update filters field-by-field:
+   - for each key in filters, keep the prior value unless the current user query explicitly changes, removes, or broadens that filter
+   - for filter keys that change, set the new value using the filter field rules below
+   - for filter keys the current user query explicitly removes or broadens, set that filter value to null
+2. Update semanticQuery:
+   - keep, add, or replace semantic terms subject to the semanticQuery rules below
+   - keep it if the prior semantic meaning is still relevant
+     example: prior semanticQuery="workout" and current user query is "for women under 50" -> keep "workout"
+   - add new semantic terms if the current user query adds compatible semantic intent
+     example: prior semanticQuery="workout" and current user query is "for running too" -> semanticQuery should include both "workout" and "running"
+   - replace it if the current user query introduces different semantic intent
+     example: prior semanticQuery="running" and current user query is "for recovery instead" -> replace "running" with "recovery"
+3. If the user says reset/start over/new search, ignore priorState and build state only from the current user query.
+4. After updating all other relevant next-state fields, recompute retrievalMode using the retrievalMode consistency rules below.
+5. Return the full next-state object, not a partial patch and not prose.
+""".strip()
+        else:
+            preamble = """
+You are a strict retrieval planner for an e-commerce assistant handling a new search turn.
 
-Examples:
-- prior has in-stock tops; current: "under 35 dollars" -> updatedQuery keeps "in stock".
-- prior has out-of-stock bottoms; current: "for women" -> updatedQuery keeps "out of stock".
-- prior has in-stock tops; current: "any availability is fine" -> updatedQuery drops stock constraint.
+Input contains only the current user query.
+Your job is to build a fresh next-state JSON object from that query.
+Do not assume prior constraints unless they are explicitly present in the current user query.
 """.strip()
 
-    def build_query_planner_system_prompt(self) -> str:
-        return """
+        if has_memory_context:
+            planner_flag_rules = """
+8) clearFields
+- use only when the current user query explicitly clears or broadens prior filter constraints.
+- allowed values only:
+  category, gender, thermalProfile, priceMinCents, priceMaxCents, availability, minRating
+- otherwise [].
+
+9) resetRequested
+- true only when the current user query explicitly resets prior context (says start over, new search, reset).
+- otherwise false.
+
+10) comparisonRequested
+- true only when the current user query explicitly asks to compare items.
+- otherwise false.
+""".strip()
+        else:
+            planner_flag_rules = """
+8) clearFields
+- because priorState is absent, always return [].
+
+9) resetRequested
+- because priorState is absent, always return false.
+
+10) comparisonRequested
+- because priorState is absent, always return false.
+""".strip()
+
+        return f"""{preamble}
+
 You are a strict retrieval planner for an e-commerce assistant.
 
-Input contains a standalone user query.
-Return exactly one JSON object. No markdown. No prose. No code fences.
+Return exactly one JSON object with exactly these six top-level keys, even when some values are false, empty, or null:
+filters, semanticQuery, retrievalMode, resetRequested, clearFields, comparisonRequested.
+No markdown. No prose. No code fences.
 
 Required top-level keys (always include all):
-- retrievalMode
 - filters
 - semanticQuery
+- retrievalMode
 - resetRequested
 - clearFields
 - comparisonRequested
 
 Output contract template:
-{
-  "retrievalMode": "structured|hybrid|semantic",
-  "filters": {
+{{
+  "filters": {{
     "category": "tops|bottoms|null",
     "gender": "men|women|unisex|null",
     "thermalProfile": "hot_weather|cold_weather|all_season|null",
@@ -219,19 +242,19 @@ Output contract template:
     "priceMaxCents": "integer>=0|null",
     "availability": "boolean|null",
     "minRating": "number(0..5)|null"
-  },
+  }},
   "semanticQuery": "string (can be empty)",
+  "retrievalMode": "structured|hybrid|semantic",
   "resetRequested": "boolean",
   "clearFields": ["array of allowed keys"],
   "comparisonRequested": "boolean"
-}
+}}
 
 Field rules:
 1) filters.category
 - set only to tops or bottoms when user intent is explicit.
 - otherwise null.
-- garment words can imply category mapping (e.g., sweater/hoodie/tank -> tops; jogger/legging/shorts -> bottoms),
-  but those garment words still carry semantic/style intent.
+- when garment words appear in the current user query, map them to category using these mappings: sweater/hoodie/tank -> tops; jogger/legging/shorts -> bottoms.
 
 2) filters.gender
 - map men/male/mens -> men
@@ -254,7 +277,7 @@ Field rules:
 - explicit numeric prices always override tier defaults.
 
 5) filters.availability
-- true for in-stock / available now / available
+- true for in stock / available now / available
 - false for out of stock / unavailable
 - otherwise null.
 
@@ -268,23 +291,12 @@ Field rules:
 - set to empty string "" when no meaningful residual semantic intent remains.
 - do NOT repeat structured filter content in semanticQuery
   (category, gender, availability, numeric price, rating, mapped premium/budget terms, mapped climate terms).
-- keep specific garment/item words in semanticQuery when they add preference signal beyond category
+- keep only specific garment/item words in semanticQuery when they add product preference beyond the generic category
   (e.g., "sweater", "hoodie", "tank", "legging", "jogger"), even if category is mapped.
+- do NOT keep generic category words in semanticQuery such as "top", "tops", "bottom", or "bottoms".
 - example: "show sweaters for women under 90" -> filters.category="tops" and semanticQuery includes "sweater".
 
-8) clearFields
-- use only when user explicitly clears constraints (any price, ignore rating, no gender preference, start over).
-- allowed values only:
-  category, gender, thermalProfile, priceMinCents, priceMaxCents, availability, minRating
-- otherwise [].
-
-9) resetRequested
-- true only when user explicitly resets (start over, new search, reset).
-- otherwise false.
-
-10) comparisonRequested
-- true only for compare/comparison/vs/versus intent.
-- otherwise false.
+{planner_flag_rules}
 
 retrievalMode MUST obey these consistency rules:
 - structured: semanticQuery must be "" and at least one filter is non-null.
@@ -304,9 +316,9 @@ Final consistency step (mandatory before returning JSON):
 
     # Backward-compatible alias used by existing tests and callers.
     def build_system_prompt(self) -> str:
-        return self.build_query_planner_system_prompt()
+        return self.build_query_planner_system_prompt(has_memory_context=False)
 
-    def build_updater_prompt_payload(
+    def build_planner_prompt_payload(
         self,
         *,
         query: str,
@@ -315,32 +327,20 @@ Final consistency step (mandatory before returning JSON):
         prior_comparison_requested: bool,
         prior_reset_requested: bool,
         has_prior_recommendations: bool,
+        has_memory_context: bool,
     ) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             'query': query,
-            'priorState': {
+        }
+        if has_memory_context:
+            payload['priorState'] = {
                 'filters': prior_filters,
                 'semanticQuery': prior_semantic_query,
                 'comparisonRequested': prior_comparison_requested,
                 'resetRequested': prior_reset_requested,
                 'hasRecommendedProducts': has_prior_recommendations,
-            },
-        }
-
-    def build_planner_prompt_payload(
-        self,
-        *,
-        query: str,
-        reset_requested: bool,
-        comparison_requested: bool,
-    ) -> dict[str, Any]:
-        return {
-            'query': query,
-            'updaterHints': {
-                'resetRequested': reset_requested,
-                'comparisonRequested': comparison_requested,
-            },
-        }
+            }
+        return payload
 
     # Backward-compatible alias.
     def build_user_prompt_payload(
@@ -353,13 +353,21 @@ Final consistency step (mandatory before returning JSON):
         prior_reset_requested: bool,
         has_prior_recommendations: bool,
     ) -> dict[str, Any]:
-        return self.build_updater_prompt_payload(
+        has_memory_context = (
+            bool(prior_semantic_query.strip())
+            or prior_comparison_requested
+            or prior_reset_requested
+            or has_prior_recommendations
+            or any(value is not None for value in prior_filters.values())
+        )
+        return self.build_planner_prompt_payload(
             query=query,
             prior_filters=prior_filters,
             prior_semantic_query=prior_semantic_query,
             prior_comparison_requested=prior_comparison_requested,
             prior_reset_requested=prior_reset_requested,
             has_prior_recommendations=has_prior_recommendations,
+            has_memory_context=has_memory_context,
         )
 
     def plan(
@@ -376,8 +384,7 @@ Final consistency step (mandatory before returning JSON):
             raise RuntimeError('Query planner is disabled.')
 
         self._last_run_metrics = {
-            'updater_attempted': False,
-            'updater_pass': False,
+            'has_memory_context': False,
             'planner_pass': False,
         }
 
@@ -388,47 +395,22 @@ Final consistency step (mandatory before returning JSON):
             or has_prior_recommendations
             or any(value is not None for value in prior_filters.values())
         )
-
-        updated_query = query
-        updater_reset_requested = False
-        updater_comparison_requested = False
-
-        if has_memory_context:
-            self._last_run_metrics['updater_attempted'] = True
-            updater_payload = self.build_updater_prompt_payload(
-                query=query,
-                prior_filters=prior_filters,
-                prior_semantic_query=prior_semantic_query,
-                prior_comparison_requested=prior_comparison_requested,
-                prior_reset_requested=prior_reset_requested,
-                has_prior_recommendations=has_prior_recommendations,
-            )
-            updater_result = self._call_llm_json(
-                payload=updater_payload,
-                system_prompt=self.build_query_updater_system_prompt(),
-                max_output_tokens=320,
-            )
-            _ensure_required_keys(
-                payload=updater_result,
-                required_keys={'updatedQuery', 'resetRequested', 'comparisonRequested'},
-                stage='query_updater',
-            )
-            updated_query_candidate = updater_result.get('updatedQuery')
-            if not isinstance(updated_query_candidate, str) or updated_query_candidate.strip() == '':
-                raise ValueError('Query updater produced empty updatedQuery.')
-            updated_query = updated_query_candidate.strip()
-            updater_reset_requested = _coerce_bool(updater_result.get('resetRequested'))
-            updater_comparison_requested = _coerce_bool(updater_result.get('comparisonRequested'))
-            self._last_run_metrics['updater_pass'] = True
+        self._last_run_metrics['has_memory_context'] = has_memory_context
 
         planner_payload = self.build_planner_prompt_payload(
-            query=updated_query,
-            reset_requested=updater_reset_requested,
-            comparison_requested=updater_comparison_requested,
+            query=query,
+            prior_filters=prior_filters,
+            prior_semantic_query=prior_semantic_query,
+            prior_comparison_requested=prior_comparison_requested,
+            prior_reset_requested=prior_reset_requested,
+            has_prior_recommendations=has_prior_recommendations,
+            has_memory_context=has_memory_context,
         )
         planner_result = self._call_llm_json(
             payload=planner_payload,
-            system_prompt=self.build_query_planner_system_prompt(),
+            system_prompt=self.build_query_planner_system_prompt(
+                has_memory_context=has_memory_context,
+            ),
             max_output_tokens=320,
         )
         _ensure_required_keys(

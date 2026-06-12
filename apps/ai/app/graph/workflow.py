@@ -409,7 +409,6 @@ class AssistantGraphWorkflow:
             reset_requested
             or len(changed_filter_keys) > 0
             or semantic_changed
-            or comparison_changed
             or len(clear_fields) > 0
         )
         skip_retrieval = (
@@ -471,6 +470,7 @@ class AssistantGraphWorkflow:
             'retrieval_mode': retrieval_mode,
             'normalized_filters': merged_filters,
             'comparison_requested': comparison_requested,
+            'recommended_product_ids': prior_recommended_ids if skip_retrieval else [],
             'prior_recommended_product_ids': prior_recommended_ids,
             'skip_retrieval': skip_retrieval,
             'reset_requested': reset_requested,
@@ -505,7 +505,7 @@ class AssistantGraphWorkflow:
                 'thread_id': state['thread_id'],
                 'retrieval_mode': state.get('retrieval_mode'),
                 'planner_enabled': True,
-                'updater_attempted': has_memory_context,
+                'has_memory_context': has_memory_context,
             },
         )
 
@@ -550,8 +550,7 @@ class AssistantGraphWorkflow:
                     'fallback_reason': type(exc).__name__,
                     'retrieval_mode': state.get('retrieval_mode'),
                     'planner_enabled': True,
-                    'updater_attempted': planner_metrics.get('updater_attempted', False),
-                    'updater_pass': planner_metrics.get('updater_pass', False),
+                    'has_memory_context': planner_metrics.get('has_memory_context', False),
                     'planner_pass': planner_metrics.get('planner_pass', False),
                 },
             )
@@ -569,8 +568,7 @@ class AssistantGraphWorkflow:
                 'thread_id': state['thread_id'],
                 'retrieval_mode': planned_state['retrieval_mode'],
                 'planner_enabled': True,
-                'updater_attempted': planner_metrics.get('updater_attempted', False),
-                'updater_pass': planner_metrics.get('updater_pass', False),
+                'has_memory_context': planner_metrics.get('has_memory_context', False),
                 'planner_pass': planner_metrics.get('planner_pass', False),
             },
         )
@@ -631,7 +629,6 @@ class AssistantGraphWorkflow:
             or len(planner_result.clear_fields) > 0
             or semantic_changed
             or retrieval_mode_changed
-            or comparison_changed
         )
         skip_retrieval = (
             comparison_requested
@@ -690,6 +687,7 @@ class AssistantGraphWorkflow:
             'retrieval_mode': planner_result.retrieval_mode,
             'normalized_filters': merged_filters,
             'comparison_requested': comparison_requested,
+            'recommended_product_ids': effective_prior_recommended_ids if skip_retrieval else [],
             'prior_recommended_product_ids': effective_prior_recommended_ids,
             'skip_retrieval': skip_retrieval,
             'reset_requested': planner_result.reset_requested and has_memory_context,
