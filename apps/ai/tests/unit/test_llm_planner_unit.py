@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from app.llm.planner import AssistantQueryPlanner
+from app.llm.planner import AssistantQueryPlanner, PlannerOutputInvalidError
 
 
 class _FakeResponse:
@@ -71,11 +73,53 @@ def _plan_kwargs() -> dict[str, object]:
     }
 
 
+def _filters_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        'category': None,
+        'gender': None,
+        'thermalProfile': None,
+        'priceMinCents': None,
+        'priceMaxCents': None,
+        'availability': None,
+        'minRating': None,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _planner_output_json(
+    *,
+    retrieval_mode: str,
+    filters: dict[str, object],
+    semantic_query: str,
+    reset_requested: bool = False,
+    clear_fields: list[str] | None = None,
+    comparison_requested: bool = False,
+) -> str:
+    return json.dumps(
+        {
+            'retrievalMode': retrieval_mode,
+            'filters': filters,
+            'semanticQuery': semantic_query,
+            'resetRequested': reset_requested,
+            'clearFields': clear_fields or [],
+            'comparisonRequested': comparison_requested,
+        },
+        separators=(',', ':'),
+    )
+
+
 def test_planner_accepts_valid_contract_output() -> None:
     planner = _planner(
-        content=(
-            '{"retrievalMode":"hybrid","filters":{"category":"tops","gender":"men","thermalProfile":"cold_weather","priceMaxCents":8000},'
-            '"semanticQuery":"warm workout","resetRequested":false,"clearFields":[],"comparisonRequested":false}'
+        content=_planner_output_json(
+            retrieval_mode='hybrid',
+            filters=_filters_payload(
+                category='tops',
+                gender='men',
+                thermalProfile='cold_weather',
+                priceMaxCents=8000,
+            ),
+            semantic_query='warm workout',
         ),
     )
 
@@ -92,18 +136,39 @@ def test_planner_accepts_valid_contract_output() -> None:
 def test_planner_rejects_invalid_json() -> None:
     planner = _planner(content='not-json')
 
-    with pytest.raises(ValueError):
+    with pytest.raises(PlannerOutputInvalidError, match='not valid JSON'):
         planner.plan(**_plan_kwargs())
+    assert planner._client.models.calls == 2
+    assert planner.last_run_metrics == {
+        'has_memory_context': False,
+        'planner_pass': False,
+    }
 
 
-def test_planner_coerces_invalid_schema_values() -> None:
+def test_planner_retries_once_when_first_schema_output_is_invalid() -> None:
     planner = _planner(
-        content='{"retrievalMode":"hybrid","filters":{"priceMinCents":9000,"priceMaxCents":1000},"semanticQuery":"","resetRequested":false,"clearFields":[],"comparisonRequested":false}',
+        contents=[
+            _planner_output_json(
+                retrieval_mode='structured',
+                filters=_filters_payload(priceMinCents=9000, priceMaxCents=1000),
+                semantic_query='',
+            ),
+            _planner_output_json(
+                retrieval_mode='structured',
+                filters=_filters_payload(priceMinCents=9000, priceMaxCents=None),
+                semantic_query='',
+            ),
+        ],
     )
 
     result = planner.plan(**_plan_kwargs())
     assert result.filters.price_min_cents == 9000
     assert result.filters.price_max_cents is None
+    assert planner._client.models.calls == 2
+    assert planner.last_run_metrics == {
+        'has_memory_context': False,
+        'planner_pass': True,
+    }
 
 
 def test_planner_rejects_missing_required_keys() -> None:
@@ -111,15 +176,20 @@ def test_planner_rejects_missing_required_keys() -> None:
         content='{"retrievalMode":"hybrid","filters":{},"semanticQuery":""}',
     )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(PlannerOutputInvalidError, match='failed validation'):
         planner.plan(**_plan_kwargs())
+    assert planner._client.models.calls == 2
 
 
 def test_planner_accepts_null_thermal_profile_when_uncertain() -> None:
     planner = _planner(
-        content=(
-            '{"retrievalMode":"hybrid","filters":{"category":"tops","thermalProfile":null},'
-            '"semanticQuery":"summer breeze training","resetRequested":false,"clearFields":[],"comparisonRequested":false}'
+        content=_planner_output_json(
+            retrieval_mode='hybrid',
+            filters=_filters_payload(
+                category='tops',
+                thermalProfile=None,
+            ),
+            semantic_query='summer breeze training',
         ),
     )
 
@@ -129,7 +199,11 @@ def test_planner_accepts_null_thermal_profile_when_uncertain() -> None:
 
 def test_planner_disabled_raises_runtime_error() -> None:
     planner = _planner(
-        content='{"retrievalMode":"structured","filters":{},"semanticQuery":"","resetRequested":false,"clearFields":[],"comparisonRequested":false}',
+        content=_planner_output_json(
+            retrieval_mode='structured',
+            filters=_filters_payload(),
+            semantic_query='',
+        ),
         enabled=False,
     )
 
@@ -139,7 +213,16 @@ def test_planner_disabled_raises_runtime_error() -> None:
 
 def test_planner_uses_single_planner_call_with_prior_state_when_memory_exists() -> None:
     planner = _planner(
-        content='{"retrievalMode":"structured","filters":{"category":"tops","gender":"women","priceMaxCents":4000,"availability":true},"semanticQuery":"","resetRequested":false,"clearFields":[],"comparisonRequested":false}',
+        content=_planner_output_json(
+            retrieval_mode='structured',
+            filters=_filters_payload(
+                category='tops',
+                gender='women',
+                priceMaxCents=4000,
+                availability=True,
+            ),
+            semantic_query='',
+        ),
     )
 
     result = planner.plan(
@@ -169,7 +252,7 @@ def test_planner_fails_when_required_keys_are_missing() -> None:
         content='{"retrievalMode":"hybrid","filters":{},"semanticQuery":""}',
     )
 
-    with pytest.raises(ValueError, match='query_planner missing required keys'):
+    with pytest.raises(PlannerOutputInvalidError, match='failed validation'):
         planner.plan(
             query='make those for women',
             prior_filters={'category': 'tops'},
@@ -178,6 +261,11 @@ def test_planner_fails_when_required_keys_are_missing() -> None:
             prior_reset_requested=False,
             has_prior_recommendations=True,
         )
+    assert planner._client.models.calls == 2
+    assert planner.last_run_metrics == {
+        'has_memory_context': True,
+        'planner_pass': False,
+    }
 
 
 def test_follow_up_planner_prompt_includes_carry_forward_rules() -> None:

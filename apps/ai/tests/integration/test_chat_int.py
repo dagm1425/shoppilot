@@ -169,6 +169,37 @@ class _WorkflowTools:
         return CompareItemsToolOutput(summary='Compared selected products.', compared_items=[])
 
 
+def _planner_output(
+    *,
+    retrieval_mode: str,
+    semantic_query: str,
+    reset_requested: bool = False,
+    clear_fields: list[str] | None = None,
+    comparison_requested: bool = False,
+    **filter_overrides: object,
+) -> QueryPlannerOutput:
+    filters: dict[str, object] = {
+        'category': None,
+        'gender': None,
+        'thermalProfile': None,
+        'priceMinCents': None,
+        'priceMaxCents': None,
+        'availability': None,
+        'minRating': None,
+    }
+    filters.update(filter_overrides)
+    return QueryPlannerOutput.model_validate(
+        {
+            'retrievalMode': retrieval_mode,
+            'filters': filters,
+            'semanticQuery': semantic_query,
+            'resetRequested': reset_requested,
+            'clearFields': clear_fields or [],
+            'comparisonRequested': comparison_requested,
+        }
+    )
+
+
 def _recommended_response() -> ChatResponse:
     recommendation = FinalRecommendation(
         summary='Two strong in-stock options for training tops.',
@@ -387,55 +418,35 @@ def test_chat_three_turn_follow_up_uses_updater_state_and_replaces_semantic_inte
     tools = _WorkflowTools()
     planner = _StubPlanner(
         outcomes=[
-            QueryPlannerOutput.model_validate(
-                {
-                    'retrievalMode': 'structured',
-                    'filters': {
-                        'category': 'tops',
-                        'gender': 'men',
-                        'priceMaxCents': 8000,
-                        'availability': True,
-                        'minRating': 4.0,
-                    },
-                    'semanticQuery': '',
-                    'resetRequested': False,
-                    'clearFields': [],
-                    'comparisonRequested': False,
-                }
+            _planner_output(
+                retrieval_mode='structured',
+                semantic_query='',
+                category='tops',
+                gender='men',
+                priceMaxCents=8000,
+                availability=True,
+                minRating=4.0,
             ),
-            QueryPlannerOutput.model_validate(
-                {
-                    'retrievalMode': 'hybrid',
-                    'filters': {
-                        'category': 'tops',
-                        'gender': 'men',
-                        'priceMinCents': 5000,
-                        'priceMaxCents': None,
-                        'availability': True,
-                        'minRating': 4.0,
-                    },
-                    'semanticQuery': 'premium men tops',
-                    'resetRequested': False,
-                    'clearFields': ['priceMaxCents'],
-                    'comparisonRequested': False,
-                }
+            _planner_output(
+                retrieval_mode='hybrid',
+                semantic_query='premium men tops',
+                category='tops',
+                gender='men',
+                priceMinCents=5000,
+                priceMaxCents=None,
+                availability=True,
+                minRating=4.0,
+                clear_fields=['priceMaxCents'],
             ),
-            QueryPlannerOutput.model_validate(
-                {
-                    'retrievalMode': 'hybrid',
-                    'filters': {
-                        'category': 'tops',
-                        'gender': 'men',
-                        'thermalProfile': 'cold_weather',
-                        'priceMinCents': 5000,
-                        'availability': True,
-                        'minRating': 4.0,
-                    },
-                    'semanticQuery': 'cold weather men tops',
-                    'resetRequested': False,
-                    'clearFields': [],
-                    'comparisonRequested': False,
-                }
+            _planner_output(
+                retrieval_mode='hybrid',
+                semantic_query='cold weather men tops',
+                category='tops',
+                gender='men',
+                thermalProfile='cold_weather',
+                priceMinCents=5000,
+                availability=True,
+                minRating=4.0,
             ),
         ],
     )

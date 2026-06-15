@@ -6,7 +6,7 @@ from typing import Any, Literal
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 PlannerClearField = Literal[
     'category',
@@ -19,29 +19,95 @@ PlannerClearField = Literal[
 ]
 
 
+class PlannerOutputInvalidError(Exception):
+    """Raised when planner JSON is present but does not satisfy the output contract."""
+
+
 class _PlannerFilters(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
-        populate_by_name=True,
-        str_strip_whitespace=True,
+        extra='forbid',  # reject unexpected keys
+        populate_by_name=True,  # Python uses snake_case while LLM JSON uses camelCase aliases
+        str_strip_whitespace=True,  # trim surrounding whitespace on strings
     )
 
-    category: str | None = None
-    gender: str | None = None
-    thermal_profile: str | None = Field(default=None, alias='thermalProfile')
-    price_min_cents: int | None = Field(default=None, ge=0, alias='priceMinCents')
-    price_max_cents: int | None = Field(default=None, ge=0, alias='priceMaxCents')
-    availability: bool | None = None
-    min_rating: float | None = Field(default=None, ge=0, le=5, alias='minRating')
+    # Nullable but required: the planner must return every filter key explicitly,
+    # even when the value is null.
+    category: str | None
+    gender: str | None
+    thermal_profile: str | None = Field(alias='thermalProfile')
+    price_min_cents: int | None = Field(ge=0, alias='priceMinCents')
+    price_max_cents: int | None = Field(ge=0, alias='priceMaxCents')
+    availability: bool | None
+    min_rating: float | None = Field(ge=0, le=5, alias='minRating')
+
+    # Pydantic validates against the field definition first (including whether the
+    # field is required), then runs this custom field validator.
+    # Field validators are defined as class methods, not instance methods.
+    @field_validator('category')
+    @classmethod
+    def normalize_category(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lower()
+        if normalized == '':
+            return None
+        if normalized not in {'tops', 'bottoms'}:
+            raise ValueError('category must be "tops" or "bottoms" when provided.')
+        return normalized
+
+    @field_validator('gender')
+    @classmethod
+    def normalize_gender(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lower()
+        if normalized == '':
+            return None
+        if normalized in {'men', 'male', 'mens'}:
+            return 'men'
+        if normalized in {'women', 'female', 'womens'}:
+            return 'women'
+        if normalized == 'unisex':
+            return 'unisex'
+        raise ValueError('gender must be one of: men, women, unisex.')
+
+    @field_validator('thermal_profile')
+    @classmethod
+    def normalize_thermal_profile(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lower()
+        if normalized == '':
+            return None
+        if normalized in {'hot_weather', 'hot-weather', 'hot weather'}:
+            return 'hot_weather'
+        if normalized in {'cold_weather', 'cold-weather', 'cold weather'}:
+            return 'cold_weather'
+        if normalized in {'all_season', 'all-season', 'all season'}:
+            return 'all_season'
+        raise ValueError('thermalProfile must be one of: hot_weather, cold_weather, all_season.')
+
+    # Pydantic validates fields one by one first; this runs after that so it can
+    # check the fully built _PlannerFilters object.
+    @model_validator(mode='after')
+    def validate_price_range(self) -> '_PlannerFilters':
+        if (
+            self.price_min_cents is not None
+            and self.price_max_cents is not None
+            and self.price_min_cents > self.price_max_cents
+        ):
+            raise ValueError('priceMinCents must be <= priceMaxCents.')
+        return self
 
 
 class QueryPlannerOutput(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
-        populate_by_name=True,
-        str_strip_whitespace=True,
+        extra='forbid',  # reject unexpected keys
+        populate_by_name=True,  # Python uses snake_case while LLM JSON uses camelCase aliases
+        str_strip_whitespace=True,  # trim surrounding whitespace on strings
     )
 
+    # No default means these fields are required during Pydantic validation.
     retrieval_mode: Literal['structured', 'hybrid', 'semantic'] = Field(alias='retrievalMode')
     filters: _PlannerFilters
     semantic_query: str = Field(alias='semanticQuery')
@@ -324,27 +390,25 @@ Final consistency step (mandatory before returning JSON):
             has_prior_recommendations=has_prior_recommendations,
             has_memory_context=has_memory_context,
         )
-        planner_result = self._call_llm_json(
-            payload=planner_payload,
-            system_prompt=self.build_query_planner_system_prompt(
-                has_memory_context=has_memory_context,
-            ),
-            max_output_tokens=320,
+        system_prompt = self.build_query_planner_system_prompt(
+            has_memory_context=has_memory_context,
         )
-        _ensure_required_keys(
-            payload=planner_result,
-            required_keys={
-                'retrievalMode',
-                'filters',
-                'semanticQuery',
-                'resetRequested',
-                'clearFields',
-                'comparisonRequested',
-            },
-            stage='query_planner',
-        )
-        self._last_run_metrics['planner_pass'] = True
-        return _coerce_planner_output(planner_result)
+
+        for attempt in range(2):
+            try:
+                planner_result = self._call_llm_json(
+                    payload=planner_payload,
+                    system_prompt=system_prompt,
+                    max_output_tokens=320,
+                )
+                validated_output = _validate_planner_output(planner_result)
+            except PlannerOutputInvalidError:
+                if attempt == 0:
+                    continue
+                raise
+
+            self._last_run_metrics['planner_pass'] = True
+            return validated_output
 
     def _call_llm_json(
         self,
@@ -382,7 +446,7 @@ Final consistency step (mandatory before returning JSON):
 def _extract_response_text(*, response: Any) -> str:
     content = getattr(response, 'text', None)
     if not isinstance(content, str) or content.strip() == '':
-        raise ValueError('Query planner returned empty content.')
+        raise PlannerOutputInvalidError('Query planner returned empty content.')
     return content.strip()
 
 
@@ -395,179 +459,33 @@ def _load_json_payload(*, content: str) -> dict[str, Any]:
 
     try:
         parsed = json.loads(normalized)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         # Tolerate occasional model wrappers by extracting the first JSON object.
         first_open = normalized.find('{')
         last_close = normalized.rfind('}')
         if first_open == -1 or last_close == -1 or last_close <= first_open:
-            raise
+            # as exc gives a variable name to the caught old error
+            # raise NewError(...) from exc creates a new error and links the old one as its cause
+            raise PlannerOutputInvalidError('Query planner output is not valid JSON.') from exc
         candidate = normalized[first_open : last_close + 1]
         decoder = json.JSONDecoder()
-        parsed, _end = decoder.raw_decode(candidate)
+        try:
+            parsed, _end = decoder.raw_decode(candidate)
+        except json.JSONDecodeError as nested_exc:
+            # as exc gives a variable name to the caught old error
+            # raise NewError(...) from exc creates a new error and links the old one as its cause
+            raise PlannerOutputInvalidError('Query planner output is not valid JSON.') from nested_exc
 
     if not isinstance(parsed, dict):
-        raise ValueError('Query planner output must be a JSON object.')
+        raise PlannerOutputInvalidError('Query planner output must be a JSON object.')
     return parsed
 
 
-def _ensure_required_keys(
+def _derive_retrieval_mode(
     *,
-    payload: dict[str, Any],
-    required_keys: set[str],
-    stage: str,
-) -> None:
-    missing = sorted(key for key in required_keys if key not in payload)
-    if missing:
-        raise ValueError(f'{stage} missing required keys: {missing}')
-
-
-def _coerce_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {'true', '1', 'yes'}:
-            return True
-        if normalized in {'false', '0', 'no'}:
-            return False
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return False
-
-
-def _coerce_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return max(0, value)
-    if isinstance(value, float):
-        return max(0, int(value))
-    if isinstance(value, str):
-        candidate = value.strip()
-        if candidate == '':
-            return None
-        try:
-            parsed = int(float(candidate))
-        except ValueError:
-            return None
-        return max(0, parsed)
-    return None
-
-
-def _coerce_float(value: Any, *, min_value: float, max_value: float) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return min(max(float(value), min_value), max_value)
-    if isinstance(value, str):
-        candidate = value.strip()
-        if candidate == '':
-            return None
-        try:
-            parsed = float(candidate)
-        except ValueError:
-            return None
-        return min(max(parsed, min_value), max_value)
-    return None
-
-
-def _normalize_category(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip().lower()
-    if normalized in {'tops', 'bottoms'}:
-        return normalized
-    return None
-
-
-def _normalize_gender(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip().lower()
-    if normalized in {'men', 'male', 'mens'}:
-        return 'men'
-    if normalized in {'women', 'female', 'womens'}:
-        return 'women'
-    if normalized == 'unisex':
-        return 'unisex'
-    return None
-
-
-def _normalize_thermal_profile(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip().lower()
-    if normalized in {'hot_weather', 'hot-weather', 'hot weather'}:
-        return 'hot_weather'
-    if normalized in {'cold_weather', 'cold-weather', 'cold weather'}:
-        return 'cold_weather'
-    if normalized in {'all_season', 'all-season', 'all season'}:
-        return 'all_season'
-    return None
-
-
-def _normalize_retrieval_mode(value: Any) -> Literal['structured', 'hybrid', 'semantic']:
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {'structured', 'hybrid', 'semantic'}:
-            return normalized
-    return 'hybrid'
-
-
-def _coerce_planner_output(payload: dict[str, Any]) -> QueryPlannerOutput:
-    filters_payload = payload.get('filters')
-    if not isinstance(filters_payload, dict):
-        filters_payload = {}
-
-    price_min_cents = _coerce_int(filters_payload.get('priceMinCents'))
-    price_max_cents = _coerce_int(filters_payload.get('priceMaxCents'))
-    if (
-        price_min_cents is not None
-        and price_max_cents is not None
-        and price_min_cents > price_max_cents
-    ):
-        price_max_cents = None
-
-    clear_fields_payload = payload.get('clearFields')
-    clear_fields: list[PlannerClearField] = []
-    if isinstance(clear_fields_payload, list):
-        for value in clear_fields_payload:
-            if isinstance(value, str) and value in {
-                'category',
-                'gender',
-                'thermalProfile',
-                'priceMinCents',
-                'priceMaxCents',
-                'availability',
-                'minRating',
-            }:
-                typed_value = value  # keep literal for type checker
-                if typed_value not in clear_fields:
-                    clear_fields.append(typed_value)
-
-    semantic_query_raw = payload.get('semanticQuery')
-    semantic_query = semantic_query_raw.strip() if isinstance(semantic_query_raw, str) else ''
-
-    filters = _PlannerFilters.model_construct(
-        category=_normalize_category(filters_payload.get('category')),
-        gender=_normalize_gender(filters_payload.get('gender')),
-        thermal_profile=_normalize_thermal_profile(filters_payload.get('thermalProfile')),
-        price_min_cents=price_min_cents,
-        price_max_cents=price_max_cents,
-        availability=(
-            _coerce_bool(filters_payload.get('availability'))
-            if filters_payload.get('availability') is not None
-            else None
-        ),
-        min_rating=_coerce_float(filters_payload.get('minRating'), min_value=0, max_value=5),
-    )
-
-    # Deterministic mode reconciliation:
-    # Avoid planner-mode drift by deriving retrieval mode from canonical signal presence.
+    filters: _PlannerFilters,
+    semantic_query: str,
+) -> Literal['structured', 'hybrid', 'semantic']:
     has_filters = any(
         value is not None
         for value in (
@@ -582,19 +500,22 @@ def _coerce_planner_output(payload: dict[str, Any]) -> QueryPlannerOutput:
     )
     has_semantic = semantic_query != ''
     if has_filters and not has_semantic:
-        retrieval_mode = 'structured'
-    elif has_filters and has_semantic:
-        retrieval_mode = 'hybrid'
-    elif (not has_filters) and has_semantic:
-        retrieval_mode = 'semantic'
-    else:
-        retrieval_mode = 'structured'
+        return 'structured'
+    if has_filters and has_semantic:
+        return 'hybrid'
+    if (not has_filters) and has_semantic:
+        return 'semantic'
+    return 'structured'
 
-    return QueryPlannerOutput.model_construct(
-        retrieval_mode=retrieval_mode,
-        filters=filters,
-        semantic_query=semantic_query,
-        reset_requested=_coerce_bool(payload.get('resetRequested')),
-        clear_fields=clear_fields,
-        comparison_requested=_coerce_bool(payload.get('comparisonRequested')),
+
+def _validate_planner_output(payload: dict[str, Any]) -> QueryPlannerOutput:
+    try:
+        validated = QueryPlannerOutput.model_validate(payload)
+    except ValidationError as exc:
+        raise PlannerOutputInvalidError(f'Query planner output failed validation: {exc}') from exc
+
+    retrieval_mode = _derive_retrieval_mode(
+        filters=validated.filters,
+        semantic_query=validated.semantic_query,
     )
+    return validated.model_copy(update={'retrieval_mode': retrieval_mode})

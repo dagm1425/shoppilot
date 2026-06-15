@@ -379,6 +379,24 @@ class AssistantGraphWorkflow:
         for clear_field in clear_fields:
             merged_filters[clear_field] = None
 
+        budget_tier = _detect_fallback_budget_tier(lowered_query)
+        has_explicit_price_update = (
+            explicit_filters.get('priceMinCents') is not None
+            or explicit_filters.get('priceMaxCents') is not None
+        )
+        if (
+            budget_tier != 'none'
+            and not has_explicit_price_update
+            and 'priceMinCents' not in clear_fields
+            and 'priceMaxCents' not in clear_fields
+        ):
+            if budget_tier == 'premium':
+                merged_filters['priceMinCents'] = 5000
+                merged_filters['priceMaxCents'] = None
+            elif budget_tier == 'budget':
+                merged_filters['priceMinCents'] = None
+                merged_filters['priceMaxCents'] = 3000
+
         merged_semantic_query = intent.semantic_query.strip()
         if reset_requested:
             merged_semantic_query = ''
@@ -1280,6 +1298,14 @@ def _sanitize_fallback_semantic_query(
         return ''
 
     return query
+
+
+def _detect_fallback_budget_tier(lowered_query: str) -> Literal['premium', 'budget', 'none']:
+    if any(term in lowered_query for term in ('premium', 'high-end', 'luxury')):
+        return 'premium'
+    if any(term in lowered_query for term in ('budget friendly', 'affordable', 'cheap', 'budget')):
+        return 'budget'
+    return 'none'
 
 
 def _route_after_validation(state: AssistantGraphState) -> Literal['retry_route', 'no_result', 'final_response']:

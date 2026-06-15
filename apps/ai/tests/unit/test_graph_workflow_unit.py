@@ -206,6 +206,37 @@ def _search_output(
     )
 
 
+def _planner_output(
+    *,
+    retrieval_mode: str,
+    semantic_query: str,
+    reset_requested: bool = False,
+    clear_fields: list[str] | None = None,
+    comparison_requested: bool = False,
+    **filter_overrides: object,
+) -> QueryPlannerOutput:
+    filters: dict[str, object] = {
+        'category': None,
+        'gender': None,
+        'thermalProfile': None,
+        'priceMinCents': None,
+        'priceMaxCents': None,
+        'availability': None,
+        'minRating': None,
+    }
+    filters.update(filter_overrides)
+    return QueryPlannerOutput.model_validate(
+        {
+            'retrievalMode': retrieval_mode,
+            'filters': filters,
+            'semanticQuery': semantic_query,
+            'resetRequested': reset_requested,
+            'clearFields': clear_fields or [],
+            'comparisonRequested': comparison_requested,
+        }
+    )
+
+
 def test_workflow_run_returns_structured_recommendations() -> None:
     first = _product(
         product_id='essential-cropped-tee',
@@ -801,20 +832,13 @@ def test_workflow_uses_query_planner_plan_when_valid() -> None:
         product_map={first.product_id: first},
     )
     planner = _StubPlanner(
-        result=QueryPlannerOutput.model_validate(
-            {
-                'retrievalMode': 'structured',
-                'filters': {
-                    'category': 'tops',
-                    'gender': 'men',
-                    'priceMaxCents': 8000,
-                    'availability': True,
-                },
-                'semanticQuery': '',
-                'resetRequested': False,
-                'clearFields': [],
-                'comparisonRequested': False,
-            }
+        result=_planner_output(
+            retrieval_mode='structured',
+            semantic_query='',
+            category='tops',
+            gender='men',
+            priceMaxCents=8000,
+            availability=True,
         )
     )
     workflow = AssistantGraphWorkflow(
@@ -897,25 +921,19 @@ def test_workflow_planner_path_does_not_append_residual_semantic_text() -> None:
     )
     planner = _StubPlanner(
         result=[
-            QueryPlannerOutput.model_validate(
-                {
-                    'retrievalMode': 'hybrid',
-                    'filters': {'category': 'tops', 'gender': 'women', 'thermalProfile': 'hot_weather'},
-                    'semanticQuery': 'hot weather tops',
-                    'resetRequested': False,
-                    'clearFields': [],
-                    'comparisonRequested': False,
-                }
+            _planner_output(
+                retrieval_mode='hybrid',
+                semantic_query='hot weather tops',
+                category='tops',
+                gender='women',
+                thermalProfile='hot_weather',
             ),
-            QueryPlannerOutput.model_validate(
-                {
-                    'retrievalMode': 'hybrid',
-                    'filters': {'category': 'tops', 'gender': 'women', 'thermalProfile': 'cold_weather'},
-                    'semanticQuery': 'cold weather tops',
-                    'resetRequested': False,
-                    'clearFields': [],
-                    'comparisonRequested': False,
-                }
+            _planner_output(
+                retrieval_mode='hybrid',
+                semantic_query='cold weather tops',
+                category='tops',
+                gender='women',
+                thermalProfile='cold_weather',
             ),
         ],
     )
@@ -993,35 +1011,21 @@ def test_workflow_planner_path_trusts_planner_availability_value_when_not_explic
     )
     planner = _StubPlanner(
         result=[
-            QueryPlannerOutput.model_validate(
-                {
-                    'retrievalMode': 'structured',
-                    'filters': {
-                        'category': 'tops',
-                        'gender': 'men',
-                        'availability': True,
-                        'priceMaxCents': 8000,
-                    },
-                    'semanticQuery': '',
-                    'resetRequested': False,
-                    'clearFields': [],
-                    'comparisonRequested': False,
-                }
+            _planner_output(
+                retrieval_mode='structured',
+                semantic_query='',
+                category='tops',
+                gender='men',
+                availability=True,
+                priceMaxCents=8000,
             ),
-            QueryPlannerOutput.model_validate(
-                {
-                    'retrievalMode': 'structured',
-                    'filters': {
-                        'category': 'tops',
-                        'gender': 'men',
-                        'availability': None,
-                        'priceMaxCents': 3500,
-                    },
-                    'semanticQuery': '',
-                    'resetRequested': False,
-                    'clearFields': [],
-                    'comparisonRequested': False,
-                }
+            _planner_output(
+                retrieval_mode='structured',
+                semantic_query='',
+                category='tops',
+                gender='men',
+                availability=None,
+                priceMaxCents=3500,
             ),
         ],
     )
