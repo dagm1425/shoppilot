@@ -11,13 +11,6 @@ from fastapi.responses import StreamingResponse
 from app.llm.pricing import estimate_request_cost_usd
 from app.observability import capture_sentry_exception
 from app.request_id import (
-    AI_COST_ESTIMATE_HEADER,
-    AI_FALLBACK_REASON_HEADER,
-    AI_MODEL_HEADER,
-    AI_PROVIDER_HEADER,
-    AI_TOKEN_COMPLETION_HEADER,
-    AI_TOKEN_PROMPT_HEADER,
-    AI_TOKEN_TOTAL_HEADER,
     REQUEST_ID_HEADER,
     RUN_ID_HEADER,
     THREAD_ID_HEADER,
@@ -94,7 +87,6 @@ async def post_chat_stream(
             },
         )
 
-    _apply_telemetry_headers(response=response, telemetry=envelope.telemetry)
     response.headers[THREAD_ID_HEADER] = envelope.thread_id
 
     async def stream_events() -> AsyncIterator[bytes]:
@@ -271,46 +263,10 @@ async def post_chat_stream(
             REQUEST_ID_HEADER: effective_request_id,
             RUN_ID_HEADER: envelope.run_id,
             THREAD_ID_HEADER: envelope.thread_id,
-            **_build_telemetry_headers(envelope.telemetry),
             'cache-control': 'no-cache, no-transform',
             'connection': 'keep-alive',
         },
     )
-
-
-def _apply_telemetry_headers(response: Response, telemetry: dict[str, object]) -> None:
-    headers = _build_telemetry_headers(telemetry)
-    for key, value in headers.items():
-        response.headers[key] = value
-
-
-def _build_telemetry_headers(telemetry: dict[str, object]) -> dict[str, str]:
-    provider = telemetry.get('llm_provider')
-    model = telemetry.get('llm_model')
-    prompt_tokens = telemetry.get('token_usage_prompt')
-    completion_tokens = telemetry.get('token_usage_completion')
-    total_tokens = telemetry.get('token_usage_total')
-    cost_estimate_usd = telemetry.get('cost_estimate_usd')
-    fallback_reason = telemetry.get('fallback_reason')
-
-    headers: dict[str, str] = {}
-
-    if isinstance(provider, str) and provider.strip() != '':
-        headers[AI_PROVIDER_HEADER] = provider
-    if isinstance(model, str) and model.strip() != '':
-        headers[AI_MODEL_HEADER] = model
-    if isinstance(prompt_tokens, int):
-        headers[AI_TOKEN_PROMPT_HEADER] = str(prompt_tokens)
-    if isinstance(completion_tokens, int):
-        headers[AI_TOKEN_COMPLETION_HEADER] = str(completion_tokens)
-    if isinstance(total_tokens, int):
-        headers[AI_TOKEN_TOTAL_HEADER] = str(total_tokens)
-    if isinstance(cost_estimate_usd, (int, float)):
-        headers[AI_COST_ESTIMATE_HEADER] = f'{float(cost_estimate_usd):.10f}'
-    if isinstance(fallback_reason, str) and fallback_reason.strip() != '':
-        headers[AI_FALLBACK_REASON_HEADER] = fallback_reason
-
-    return headers
 
 
 def _encode_sse_event(event_name: str, payload: dict[str, object]) -> bytes:
