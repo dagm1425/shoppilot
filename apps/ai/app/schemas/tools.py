@@ -8,7 +8,7 @@ from .contracts import NormalizedFilters, ProductItem, SearchResult, StrictModel
 
 
 class SearchItemsToolInput(StrictModel):
-    query: str = Field(min_length=1)
+    semantic_query: str = Field(default='', alias='semanticQuery')
     retrieval_mode: Literal['structured', 'semantic', 'hybrid'] = Field(alias='retrievalMode')
     top_k: int = Field(default=5, ge=1, le=20, alias='topK')
     category: str | None = None

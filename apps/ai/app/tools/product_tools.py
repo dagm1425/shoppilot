@@ -16,7 +16,6 @@ from app.schemas import (
     SearchResult,
 )
 from app.search.models import ProductRecord, RetrievalFilters, RetrievalResult
-from app.search.query_intent import parse_intent
 from app.search.repository import ProductRepository
 from app.search.runtime import get_search_service
 from app.search.service import SemanticSearchService
@@ -34,44 +33,22 @@ class AssistantTools:
 
     @traceable(run_type='tool', name='ai.tool.search_items')
     def search_items(self, payload: SearchItemsToolInput) -> SearchItemsToolOutput:
-        parsed_intent = parse_intent(payload.query)
         filters = RetrievalFilters(
-            category=payload.category if payload.category is not None else parsed_intent.filters.category,
-            gender=payload.gender if payload.gender is not None else parsed_intent.filters.gender,
-            thermal_profile=(
-                payload.thermal_profile
-                if payload.thermal_profile is not None
-                else parsed_intent.filters.thermal_profile
-            ),
-            price_min_cents=(
-                payload.price_min_cents
-                if payload.price_min_cents is not None
-                else parsed_intent.filters.price_min_cents
-            ),
-            price_max_cents=(
-                payload.price_max_cents
-                if payload.price_max_cents is not None
-                else parsed_intent.filters.price_max_cents
-            ),
-            availability=(
-                payload.availability
-                if payload.availability is not None
-                else parsed_intent.filters.availability
-            ),
-            min_rating=(
-                payload.min_rating
-                if payload.min_rating is not None
-                else parsed_intent.filters.min_rating
-            ),
+            category=payload.category,
+            gender=payload.gender,
+            thermal_profile=payload.thermal_profile,
+            price_min_cents=payload.price_min_cents,
+            price_max_cents=payload.price_max_cents,
+            availability=payload.availability,
+            min_rating=payload.min_rating,
         )
 
         retrieval = self._search_service.retrieve_with_plan(
             retrieval_mode=payload.retrieval_mode,
             filters=filters,
-            semantic_query=payload.query,
+            semantic_query=payload.semantic_query,
             top_k=payload.top_k,
         )
-        # future: llm response synthesis - handled in Phase 4.3 graph final-response stage
 
         return SearchItemsToolOutput(
             retrieval_mode=retrieval.mode,
