@@ -24,7 +24,7 @@ def main() -> None:
     subparsers.add_parser('rebuild-index', help='Rebuild product embeddings and Chroma collection')
     eval_parser = subparsers.add_parser(
         'run-evals',
-        help='Replay the Phase 4.5 eval dataset against /ai/chat and /ai/chat/stream',
+        help='Replay the Phase 4.5 eval dataset against the stream-only assistant API (/ai/chat/stream)',
     )
     eval_parser.add_argument(
         '--dataset',

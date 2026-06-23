@@ -1,29 +1,58 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.llm.synthesizer import AssistantSynthesizer
 
 
-class _FakeResponse:
-    def __init__(self, content: str | None) -> None:
-        self.text = content
+class _FakeStreamChunk:
+    def __init__(self, text: str, *, usage_metadata: dict[str, int] | None = None) -> None:
+        self.text = text
+        self.usage_metadata = usage_metadata
 
 
-class _FakeModels:
-    def __init__(self, *, content: str | None = None, should_raise: bool = False) -> None:
-        self._content = content
+class _FakeAsyncModels:
+    def __init__(
+        self,
+        *,
+        stream_chunks: list[_FakeStreamChunk] | None = None,
+        should_raise: bool = False,
+    ) -> None:
+        self._stream_chunks = stream_chunks or []
         self._should_raise = should_raise
 
-    def generate_content(self, **kwargs):  # noqa: ANN003, ANN204
+    async def generate_content_stream(self, **kwargs):  # noqa: ANN003, ANN204
         if self._should_raise:
-            raise RuntimeError('synthetic llm failure')
-        return _FakeResponse(self._content)
+            raise RuntimeError('synthetic llm stream failure')
+
+        async def stream():
+            for chunk in self._stream_chunks:
+                yield chunk
+
+        return stream()
+
+
+class _FakeAsyncClient:
+    def __init__(self, *, stream_chunks: list[_FakeStreamChunk] | None = None, should_raise: bool = False) -> None:
+        self.models = _FakeAsyncModels(
+            stream_chunks=stream_chunks,
+            should_raise=should_raise,
+        )
 
 
 class _FakeClient:
-    def __init__(self, *, content: str | None = None, should_raise: bool = False) -> None:
-        self.models = _FakeModels(content=content, should_raise=should_raise)
+    def __init__(
+        self,
+        *,
+        stream_chunks: list[_FakeStreamChunk] | None = None,
+        should_raise: bool = False,
+    ) -> None:
+        self.aio = _FakeAsyncClient(
+            stream_chunks=stream_chunks,
+            should_raise=should_raise,
+        )
 
 
 def _retrieved_products() -> list[dict]:
@@ -57,61 +86,8 @@ def _retrieved_products() -> list[dict]:
     ]
 
 
-def test_synthesizer_accepts_valid_json_and_sanitizes_prompts() -> None:
-    client = _FakeClient(
-        content=(
-            '{"assistantMessage":"Best match is the Essential Cropped Tee.",'
-            '"followUpPrompts":["Need cheaper options?","Need cheaper options?"," ","Only in-stock?"],'
-            '"comparisonSummary":"  Top option has higher rating.  "}'
-        )
-    )
-    synthesizer = AssistantSynthesizer(
-        client=client,
-        model_name='gemini-2.5-flash',
-        provider='gemini',
-        enabled=True,
-        max_tokens=220,
-        temperature=0.2,
-        top_n_products=3,
-    )
-
-    result = synthesizer.synthesize(
-        resolved_request='recommend workout tops',
-        retrieval_mode='structured',
-        normalized_filters={'category': 'tops'},
-        retrieved_products=_retrieved_products(),
-        comparison_summary=None,
-    )
-
-    assert result.assistant_message == 'Best match is the Essential Cropped Tee.'
-    assert result.follow_up_prompts == ['Need cheaper options?', 'Only in-stock?']
-    assert result.comparison_summary == 'Top option has higher rating.'
-
-
-def test_synthesizer_raises_on_invalid_json_output() -> None:
-    client = _FakeClient(content='not-json')
-    synthesizer = AssistantSynthesizer(
-        client=client,
-        model_name='gemini-2.5-flash',
-        provider='gemini',
-        enabled=True,
-        max_tokens=220,
-        temperature=0.2,
-        top_n_products=3,
-    )
-
-    with pytest.raises(ValueError):
-        synthesizer.synthesize(
-            resolved_request='recommend workout tops',
-            retrieval_mode='structured',
-            normalized_filters={'category': 'tops'},
-            retrieved_products=_retrieved_products(),
-            comparison_summary=None,
-        )
-
-
 def test_synthesizer_build_user_prompt_payload_applies_top_n_clamp() -> None:
-    client = _FakeClient(content='{"assistantMessage":"ok","followUpPrompts":[],"comparisonSummary":null}')
+    client = _FakeClient()
     synthesizer = AssistantSynthesizer(
         client=client,
         model_name='gemini-2.5-flash',
@@ -136,8 +112,8 @@ def test_synthesizer_build_user_prompt_payload_applies_top_n_clamp() -> None:
     assert payload['products'][0]['productId'] == 'essential-cropped-tee'
 
 
-def test_synthesizer_disabled_mode_raises_runtime_error() -> None:
-    client = _FakeClient(content='{"assistantMessage":"ok","followUpPrompts":[],"comparisonSummary":null}')
+def test_synthesizer_stream_requires_enabled_mode() -> None:
+    client = _FakeClient()
     synthesizer = AssistantSynthesizer(
         client=client,
         model_name='gemini-2.5-flash',
@@ -149,17 +125,19 @@ def test_synthesizer_disabled_mode_raises_runtime_error() -> None:
     )
 
     with pytest.raises(RuntimeError, match='disabled'):
-        synthesizer.synthesize(
-            resolved_request='recommend workout tops',
-            retrieval_mode='structured',
-            normalized_filters={'category': 'tops'},
-            retrieved_products=_retrieved_products(),
-            comparison_summary=None,
+        asyncio.run(
+            synthesizer.synthesize_stream(
+                resolved_request='recommend workout tops',
+                retrieval_mode='structured',
+                normalized_filters={'category': 'tops'},
+                retrieved_products=_retrieved_products(),
+                comparison_summary=None,
+            )
         )
 
 
-def test_synthesizer_raises_on_empty_model_text() -> None:
-    client = _FakeClient(content=None)
+def test_synthesizer_stream_raises_on_empty_model_text() -> None:
+    client = _FakeClient(stream_chunks=[_FakeStreamChunk('')])
     synthesizer = AssistantSynthesizer(
         client=client,
         model_name='gemini-2.5-flash',
@@ -170,11 +148,60 @@ def test_synthesizer_raises_on_empty_model_text() -> None:
         top_n_products=3,
     )
 
-    with pytest.raises(ValueError, match='empty content'):
-        synthesizer.synthesize(
+    async def run_stream() -> None:
+        stream = await synthesizer.synthesize_stream(
             resolved_request='recommend workout tops',
             retrieval_mode='structured',
             normalized_filters={'category': 'tops'},
             retrieved_products=_retrieved_products(),
             comparison_summary=None,
         )
+        async for _ in stream:
+            pass
+
+    with pytest.raises(ValueError, match='empty content'):
+        asyncio.run(run_stream())
+
+
+def test_synthesizer_stream_yields_real_deltas_and_captures_usage() -> None:
+    client = _FakeClient(
+        stream_chunks=[
+            _FakeStreamChunk('Best match '),
+            _FakeStreamChunk(
+                'is the Essential Cropped Tee.',
+                usage_metadata={
+                    'promptTokenCount': 12,
+                    'candidatesTokenCount': 9,
+                    'totalTokenCount': 21,
+                },
+            ),
+        ]
+    )
+    synthesizer = AssistantSynthesizer(
+        client=client,
+        model_name='gemini-2.5-flash',
+        provider='gemini',
+        enabled=True,
+        max_tokens=220,
+        temperature=0.2,
+        top_n_products=3,
+    )
+
+    async def run_stream() -> tuple[list[str], object]:
+        stream = await synthesizer.synthesize_stream(
+            resolved_request='recommend workout tops',
+            retrieval_mode='structured',
+            normalized_filters={'category': 'tops'},
+            retrieved_products=_retrieved_products(),
+            comparison_summary=None,
+        )
+        deltas = [delta async for delta in stream]
+        return deltas, stream
+
+    deltas, stream = asyncio.run(run_stream())
+
+    assert deltas == ['Best match ', 'is the Essential Cropped Tee.']
+    assert stream.assistant_message == 'Best match is the Essential Cropped Tee.'
+    assert stream.prompt_tokens == 12
+    assert stream.completion_tokens == 9
+    assert stream.total_tokens == 21

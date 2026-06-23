@@ -1,67 +1,66 @@
 from __future__ import annotations
 
+import inspect
 import json
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class _AssistantSynthesisPayload(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-        populate_by_name=True,
-        str_strip_whitespace=True,
-    )
-
-    assistant_message: str = Field(alias='assistantMessage', min_length=1)
-    follow_up_prompts: list[str] = Field(default_factory=list, alias='followUpPrompts')
-    comparison_summary: str | None = Field(default=None, alias='comparisonSummary')
-
-    @field_validator('assistant_message')
-    @classmethod
-    def validate_assistant_message(cls, value: str) -> str:
-        if value.strip() == '':
-            raise ValueError('assistantMessage must not be blank.')
-        return value
-
-    @field_validator('follow_up_prompts')
-    @classmethod
-    def sanitize_follow_up_prompts(cls, value: list[str]) -> list[str]:
-        sanitized: list[str] = []
-        for prompt in value:
-            cleaned = prompt.strip()
-            if cleaned == '':
-                continue
-            if cleaned not in sanitized:
-                sanitized.append(cleaned)
-            if len(sanitized) == 3:
-                break
-        return sanitized
-
-    @field_validator('comparison_summary')
-    @classmethod
-    def sanitize_comparison_summary(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        return cleaned or None
-
-
-class AssistantSynthesisResult(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-        str_strip_whitespace=True,
-    )
-
-    assistant_message: str
-    follow_up_prompts: list[str] = Field(default_factory=list)
-    comparison_summary: str | None = None
+@dataclass
+class AssistantSynthesisStreamResult:
+    _stream: AsyncIterator[Any]
+    assistant_message: str = ''
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    _consumed: bool = False
+
+    def __aiter__(self) -> AsyncIterator[str]:
+        return self._iterate()
+
+    async def _iterate(self) -> AsyncIterator[str]:
+        if self._consumed:
+            raise RuntimeError('LLM synthesis stream can only be consumed once.')
+
+        self._consumed = True
+        buffered_text: list[str] = []
+        last_chunk: Any = None
+
+        async for chunk in self._stream:
+            last_chunk = chunk
+            text = getattr(chunk, 'text', None)
+            if not isinstance(text, str) or text == '':
+                continue
+
+            buffered_text.append(text)
+            yield text
+
+        assistant_message = ''.join(buffered_text).strip()
+        if assistant_message == '':
+            raise ValueError('LLM streaming synthesis returned empty content.')
+
+        self.assistant_message = assistant_message
+        token_usage = _extract_token_usage(response=last_chunk)
+        self.prompt_tokens = token_usage['prompt']
+        self.completion_tokens = token_usage['completion']
+        self.total_tokens = token_usage['total']
+
+    async def aclose(self) -> None:
+        aclose = getattr(self._stream, 'aclose', None)
+        if callable(aclose):
+            result = aclose()
+            if inspect.isawaitable(result):
+                await result
+            return
+
+        close = getattr(self._stream, 'close', None)
+        if callable(close):
+            close()
 
 
 class AssistantSynthesizer:
@@ -104,17 +103,17 @@ class AssistantSynthesizer:
     def top_n_products(self) -> int:
         return self._top_n_products
 
-    def build_system_prompt(self) -> str:
+    def build_streaming_system_prompt(self) -> str:
         return (
             'You are a synthesis-only assistant for e-commerce recommendations.\n'
             'Use only the provided products and metadata.\n'
             'resolvedRequest is the authoritative summary of the current request.\n'
             'Do not invent product IDs, names, prices, ratings, or availability.\n'
-            'If provided products are empty, return a graceful no-result message and helpful follow-up prompts.\n'
-            'Return strict JSON with exactly these keys: assistantMessage, followUpPrompts, comparisonSummary.\n'
-            'assistantMessage must be concise and shopper-friendly.\n'
-            'followUpPrompts must be an array of at most 3 short prompts.\n'
-            'comparisonSummary may be null.'
+            'If provided products are empty, return a graceful no-result message.\n'
+            'Return plain assistant text only.\n'
+            'Do not return JSON.\n'
+            'Do not use markdown fences.\n'
+            'Keep the answer concise and shopper-friendly.'
         )
 
     def build_user_prompt_payload(
@@ -137,7 +136,7 @@ class AssistantSynthesizer:
             'comparisonSummary': comparison_summary,
         }
 
-    def synthesize(
+    async def synthesize_stream(
         self,
         *,
         resolved_request: str,
@@ -145,11 +144,11 @@ class AssistantSynthesizer:
         normalized_filters: dict[str, Any],
         retrieved_products: list[dict[str, Any]],
         comparison_summary: str | None,
-    ) -> AssistantSynthesisResult:
+    ) -> AssistantSynthesisStreamResult:
         if not self._enabled:
             raise RuntimeError('LLM synthesis is disabled.')
 
-        system_prompt = self.build_system_prompt()
+        system_prompt = self.build_streaming_system_prompt()
         user_payload = self.build_user_prompt_payload(
             resolved_request=resolved_request,
             retrieval_mode=retrieval_mode,
@@ -160,36 +159,24 @@ class AssistantSynthesizer:
 
         prompt_payload = json.dumps(user_payload, separators=(',', ':'))
         try:
-            response = self._client.models.generate_content(
+            stream = await self._client.aio.models.generate_content_stream(
                 model=self._model_name,
                 contents=prompt_payload,
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     temperature=self._temperature,
                     max_output_tokens=self._max_tokens,
-                    response_mime_type='application/json',
-                    response_json_schema=_AssistantSynthesisPayload.model_json_schema(),
+                    response_mime_type='text/plain',
                 ),
             )
         except genai_errors.APIError as exc:
             raise RuntimeError(
-                f'Gemini synthesis request failed with API error {exc.code}: {exc.message}'
+                f'Gemini synthesis stream failed with API error {exc.code}: {exc.message}'
             ) from exc
         except Exception as exc:  # pragma: no cover - fallback for non-API runtime failures
-            raise RuntimeError(f'Gemini synthesis request failed: {exc}') from exc
+            raise RuntimeError(f'Gemini synthesis stream failed: {exc}') from exc
 
-        content = _extract_response_text(response=response)
-        parsed = _load_json_payload(content=content)
-        payload = _AssistantSynthesisPayload.model_validate(parsed)
-        token_usage = _extract_token_usage(response=response)
-        return AssistantSynthesisResult(
-            assistant_message=payload.assistant_message,
-            follow_up_prompts=payload.follow_up_prompts,
-            comparison_summary=payload.comparison_summary,
-            prompt_tokens=token_usage['prompt'],
-            completion_tokens=token_usage['completion'],
-            total_tokens=token_usage['total'],
-        )
+        return AssistantSynthesisStreamResult(_stream=stream)
 
 
 def _trim_products_for_prompt(
@@ -221,27 +208,6 @@ def _trim_products_for_prompt(
         )
 
     return trimmed
-
-
-def _extract_response_text(*, response: Any) -> str:
-    content = getattr(response, 'text', None)
-    if not isinstance(content, str) or content.strip() == '':
-        raise ValueError('LLM synthesis returned empty content.')
-
-    return content.strip()
-
-
-def _load_json_payload(*, content: str) -> dict[str, Any]:
-    normalized = content.strip()
-    if normalized.startswith('```'):
-        normalized = normalized.strip('`')
-        if normalized.lower().startswith('json'):
-            normalized = normalized[4:].strip()
-
-    parsed = json.loads(normalized)
-    if not isinstance(parsed, dict):
-        raise ValueError('LLM synthesis output must be a JSON object.')
-    return parsed
 
 
 def _extract_token_usage(*, response: Any) -> dict[str, int | None]:

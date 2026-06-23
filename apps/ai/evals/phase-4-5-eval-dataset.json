@@ -6,7 +6,6 @@
     {
       "id": "EVAL-001-structured-budget",
       "category": "budget-constraints",
-      "transport": "json",
       "steps": [
         {
           "message": "Show in-stock tops under 80 dollars with rating at least 4",
@@ -31,7 +30,6 @@
     {
       "id": "EVAL-002-semantic-query",
       "category": "retrieval-mode",
-      "transport": "json",
       "steps": [
         {
           "message": "I need lightweight breathable gym tops for daily training",
@@ -53,7 +51,6 @@
     {
       "id": "EVAL-003-hybrid-query",
       "category": "retrieval-mode",
-      "transport": "json",
       "steps": [
         {
           "message": "Find premium men tops under 120 with rating over 4",
@@ -75,7 +72,6 @@
     {
       "id": "EVAL-004-refinement-merge",
       "category": "follow-up-refinement",
-      "transport": "json",
       "steps": [
         {
           "message": "Show in-stock tops under 80",
@@ -102,7 +98,6 @@
     {
       "id": "EVAL-005-reset-command",
       "category": "reset-flow",
-      "transport": "json",
       "steps": [
         {
           "message": "Show me in-stock tops under 60",
@@ -128,7 +123,6 @@
     {
       "id": "EVAL-006-no-result",
       "category": "no-result",
-      "transport": "json",
       "steps": [
         {
           "message": "Find in-stock tops under 1 dollar with rating at least 5",
@@ -150,7 +144,6 @@
     {
       "id": "EVAL-007-compare-reuse",
       "category": "comparison-flow",
-      "transport": "json",
       "steps": [
         {
           "message": "Recommend tops under 100",
@@ -176,7 +169,6 @@
     {
       "id": "EVAL-008-compare-with-refinement",
       "category": "comparison-flow",
-      "transport": "json",
       "steps": [
         {
           "message": "Recommend tops under 100",
@@ -202,7 +194,6 @@
     {
       "id": "EVAL-009-session-isolation",
       "category": "session-isolation",
-      "transport": "json",
       "steps": [
         {
           "message": "Recommend premium tops for men",
@@ -228,10 +219,8 @@
     {
       "id": "EVAL-010-sse-happy-path",
       "category": "sse-transport",
-      "transport": "sse",
       "steps": [
         {
-          "transport": "sse",
           "message": "Recommend running tops under 100",
           "sessionId": "eval-010-session",
           "userId": "eval-user-1"
@@ -251,7 +240,6 @@
     {
       "id": "EVAL-011-validation-error",
       "category": "validation-failure",
-      "transport": "json",
       "steps": [
         {
           "message": "",

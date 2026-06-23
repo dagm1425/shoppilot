@@ -129,7 +129,6 @@ def _execute_step(
     base_url: str,
     timeout_seconds: float,
 ) -> EvalStepResult:
-    transport = str(step.get('transport', 'json')).lower()
     message = str(step.get('message', '')).strip()
     session_id = str(step.get('sessionId', f'{case_id}-session')).strip()
     user_id = str(step.get('userId', 'eval-user')).strip()
@@ -142,22 +141,12 @@ def _execute_step(
         'requestId': request_id,
     }
 
-    endpoint = '/ai/chat/stream' if transport == 'sse' else '/ai/chat'
     response = _post_json(
-        url=f'{base_url.rstrip("/")}{endpoint}',
+        url=f'{base_url.rstrip("/")}/ai/chat/stream',
         body=payload,
         headers={'x-request-id': request_id},
         timeout_seconds=timeout_seconds,
     )
-
-    if transport != 'sse':
-        payload_json = _try_parse_json(response['body'])
-        return EvalStepResult(
-            status_code=response['status'],
-            headers=response['headers'],
-            payload=payload_json,
-            sse_events=[],
-        )
 
     events = _parse_sse_events(response['body'])
     snapshot_payload = _extract_snapshot_payload(events)
@@ -289,17 +278,6 @@ def _extract_snapshot_payload(events: list[dict[str, Any]]) -> dict[str, Any] | 
         chat_response = state_payload.get('chatResponse')
         if isinstance(chat_response, dict):
             return chat_response
-    return None
-
-
-def _try_parse_json(raw_payload: str) -> dict[str, Any] | None:
-    try:
-        payload = json.loads(raw_payload)
-    except json.JSONDecodeError:
-        return None
-
-    if isinstance(payload, dict):
-        return payload
     return None
 
 

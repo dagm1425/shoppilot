@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from time import perf_counter
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -16,8 +16,7 @@ except ImportError:  # pragma: no cover - compatibility for pre-rename releases
     from langgraph.checkpoint.memory import InMemorySaver as MemorySaver
 
 from app.llm.planner import AssistantQueryPlanner, QueryPlannerOutput
-from app.llm.synthesizer import AssistantSynthesizer
-from app.llm.pricing import estimate_request_cost_usd
+from app.llm.synthesizer import AssistantSynthesisStreamResult, AssistantSynthesizer
 from app.observability import capture_sentry_exception, traceable
 from app.schemas import (
     AgentState,
@@ -95,7 +94,7 @@ class AssistantGraphState(TypedDict, total=False):
     session_id: str
     user_id: str
     thread_id: str
-    transport: Literal['json', 'sse']
+    transport: Literal['sse']
     semantic_query: str
     merged_semantic_query: str
     semantic_facets: dict[str, str]
@@ -131,7 +130,7 @@ class AssistantRunTelemetry(TypedDict):
     request_id: str
     run_id: str
     thread_id: str
-    transport: Literal['json', 'sse']
+    transport: Literal['sse']
     retrieval_mode: Literal['structured', 'semantic', 'hybrid'] | None
     llm_provider: str | None
     llm_model: str | None
@@ -143,6 +142,22 @@ class AssistantRunTelemetry(TypedDict):
     budget_top_k: int
     budget_top_n_products: int
     budget_max_output_tokens: int
+
+
+@dataclass
+class _WorkflowExecutionContext:
+    resolved_run_id: str
+    thread_id: str
+    transport: Literal['sse']
+    budget_top_n_products: int
+    budget_max_output_tokens: int
+
+
+@dataclass
+class AssistantPreparedStreamRun:
+    chat_response: ChatResponse
+    telemetry: AssistantRunTelemetry
+    synthesis_stream: AssistantSynthesisStreamResult | None
 
 
 class AssistantGraphWorkflow:
@@ -162,26 +177,64 @@ class AssistantGraphWorkflow:
         self._search_top_k = _clamp_int(search_top_k, min_value=1, max_value=20)
         self._graph = _compile_graph(self)
 
-    def run(self, payload: ChatRequest) -> ChatResponse:
-        response, _telemetry = self.run_with_telemetry(payload)
-        return response
-
-    def run_with_telemetry(
+    async def prepare_stream_response(
         self,
         payload: ChatRequest,
         *,
         run_id: str | None = None,
-        transport: Literal['json', 'sse'] = 'json',
-    ) -> tuple[ChatResponse, AssistantRunTelemetry]:
-        return self._execute(payload, run_id=run_id, transport=transport)
+    ) -> AssistantPreparedStreamRun:
+        state, context = self._invoke_graph_state(
+            payload,
+            run_id=run_id,
+        )
 
-    def _execute(
+        if not self._synthesizer.enabled and state.get('terminal_status') == 'success':
+            state['fallback_reason'] = 'disabled'
+            logger.info(
+                {
+                    'event': 'ai.llm_synthesis_fallback',
+                    'request_id': payload.request_id,
+                    'run_id': context.resolved_run_id,
+                    'thread_id': context.thread_id,
+                    'ai_retrieval_mode': state.get('retrieval_mode'),
+                    'llm_provider': self._synthesizer.provider,
+                    'llm_model': self._synthesizer.model_name,
+                    'fallback_reason': 'disabled',
+                },
+            )
+
+        response = self._build_chat_response_from_state(payload=payload, state=state)
+        telemetry = self._build_telemetry_from_state(
+            payload=payload,
+            state=state,
+            context=context,
+        )
+
+        synthesis_stream: AssistantSynthesisStreamResult | None = None
+        if self._synthesizer.enabled and state.get('terminal_status') == 'success':
+            synthesis_stream = await self._synthesizer.synthesize_stream(
+                resolved_request=str(state.get('resolved_request') or '').strip() or _build_resolved_request(
+                    normalized_filters=state.get('normalized_filters', {}),
+                    semantic_query=str(state.get('semantic_query') or ''),
+                ),
+                retrieval_mode=state.get('retrieval_mode'),
+                normalized_filters=state.get('normalized_filters', {}),
+                retrieved_products=list(state.get('retrieved_products', [])),
+                comparison_summary=state.get('comparison_summary'),
+            )
+
+        return AssistantPreparedStreamRun(
+            chat_response=response,
+            telemetry=telemetry,
+            synthesis_stream=synthesis_stream,
+        )
+
+    def _invoke_graph_state(
         self,
         payload: ChatRequest,
         *,
         run_id: str | None,
-        transport: Literal['json', 'sse'],
-    ) -> tuple[ChatResponse, AssistantRunTelemetry]:
+    ) -> tuple[AssistantGraphState, _WorkflowExecutionContext]:
         thread_id = _build_thread_id(
             user_id=payload.user_context.user_id,
             session_id=payload.session_id,
@@ -197,7 +250,7 @@ class AssistantGraphWorkflow:
             'session_id': payload.session_id,
             'user_id': payload.user_context.user_id,
             'thread_id': thread_id,
-            'transport': transport,
+            'transport': 'sse',
             'retry_count': 0,
             'validation_error': None,
             'llm_provider': self._synthesizer.provider,
@@ -218,7 +271,7 @@ class AssistantGraphWorkflow:
                 'request_id': payload.request_id,
                 'run_id': resolved_run_id,
                 'thread_id': thread_id,
-                'transport': transport,
+                'transport': 'sse',
                 'budget_top_k': self._search_top_k,
                 'budget_top_n_products': resolved_budget_top_n,
                 'budget_max_output_tokens': resolved_budget_max_tokens,
@@ -230,12 +283,12 @@ class AssistantGraphWorkflow:
                 'thread_id': thread_id,
             },
             'run_name': 'assistant_graph',
-            'tags': ['ai_assistant', f'transport:{transport}'],
+            'tags': ['ai_assistant', 'transport:sse'],
             'metadata': {
                 'request_id': payload.request_id,
                 'run_id': resolved_run_id,
                 'thread_id': thread_id,
-                'transport': transport,
+                'transport': 'sse',
             },
         }
 
@@ -256,10 +309,24 @@ class AssistantGraphWorkflow:
             )
             raise
 
+        return state, _WorkflowExecutionContext(
+            resolved_run_id=resolved_run_id,
+            thread_id=thread_id,
+            transport='sse',
+            budget_top_n_products=resolved_budget_top_n,
+            budget_max_output_tokens=resolved_budget_max_tokens,
+        )
+
+    def _build_chat_response_from_state(
+        self,
+        *,
+        payload: ChatRequest,
+        state: AssistantGraphState,
+    ) -> ChatResponse:
         recommendation = _build_recommendation_from_state(state)
         recommended_ids = [product.product_id for product in recommendation.recommended_products]
 
-        response = ChatResponse(
+        return ChatResponse(
             request_id=payload.request_id,
             session_id=payload.session_id,
             assistant_message=state.get('assistant_message', recommendation.summary),
@@ -271,11 +338,18 @@ class AssistantGraphWorkflow:
             placeholder=False,
         )
 
-        telemetry: AssistantRunTelemetry = {
+    def _build_telemetry_from_state(
+        self,
+        *,
+        payload: ChatRequest,
+        state: AssistantGraphState,
+        context: _WorkflowExecutionContext,
+    ) -> AssistantRunTelemetry:
+        return {
             'request_id': payload.request_id,
-            'run_id': state.get('run_id', resolved_run_id),
-            'thread_id': state.get('thread_id', thread_id),
-            'transport': state.get('transport', transport),
+            'run_id': state.get('run_id', context.resolved_run_id),
+            'thread_id': state.get('thread_id', context.thread_id),
+            'transport': state.get('transport', 'sse'),
             'retrieval_mode': state.get('retrieval_mode'),
             'llm_provider': state.get('llm_provider', self._synthesizer.provider),
             'llm_model': state.get('llm_model', self._synthesizer.model_name),
@@ -285,11 +359,9 @@ class AssistantGraphWorkflow:
             'cost_estimate_usd': state.get('cost_estimate_usd'),
             'fallback_reason': state.get('fallback_reason'),
             'budget_top_k': state.get('budget_top_k', self._search_top_k),
-            'budget_top_n_products': state.get('budget_top_n_products', resolved_budget_top_n),
-            'budget_max_output_tokens': state.get('budget_max_output_tokens', resolved_budget_max_tokens),
+            'budget_top_n_products': state.get('budget_top_n_products', context.budget_top_n_products),
+            'budget_max_output_tokens': state.get('budget_max_output_tokens', context.budget_max_output_tokens),
         }
-
-        return response, telemetry
 
     @traceable(run_type='chain', name='ai.graph.query_planning_node')
     def _query_planning_node(self, state: AssistantGraphState) -> AssistantGraphState:
@@ -301,7 +373,9 @@ class AssistantGraphWorkflow:
             .strip()
         )
         prior_comparison_requested = bool(state.get('comparison_requested', False))
+        prior_reset_requested = bool(state.get('reset_requested', False))
         normalized_filters = state.get('normalized_filters', {})
+        has_prior_recommendations = len(prior_recommended_ids) > 0
         has_memory_context = (
             any(
                 normalized_filters.get(key) is not None
@@ -319,7 +393,7 @@ class AssistantGraphWorkflow:
             or prior_comparison_requested
             or len(prior_recommended_ids) > 0
         )
-
+        # couldnt we rm prior filters below and simply assign it to normalized filters?
         prior_filters: dict[str, Any] = {
             'category': normalized_filters.get('category'),
             'gender': normalized_filters.get('gender'),
@@ -336,13 +410,14 @@ class AssistantGraphWorkflow:
             has_memory_context=has_memory_context,
             prior_filters=prior_filters,
             prior_recommended_ids=prior_recommended_ids,
+            prior_semantic_query=prior_semantic_query,
+            prior_comparison_requested=prior_comparison_requested,
+            prior_reset_requested=prior_reset_requested,
+            has_prior_recommendations=has_prior_recommendations,
         )
         if planner_state is not None:
             return planner_state
 
-        # TODO(remove): fallback-only deterministic planning branch.
-        # Primary path is LLM planner (`_plan_query_with_llm`). Keep this only as
-        # a safety path until planner reliability is accepted for full cutover.
         intent = parse_intent(state['query'])
         reset_requested = detect_reset_requested(state['query'])
         clear_fields = detect_filter_clears(state['query'])
@@ -508,17 +583,13 @@ class AssistantGraphWorkflow:
         has_memory_context: bool,
         prior_filters: dict[str, Any],
         prior_recommended_ids: list[str],
+        prior_semantic_query: str,
+        prior_comparison_requested: bool,
+        prior_reset_requested: bool,
+        has_prior_recommendations: bool,
     ) -> AssistantGraphState | None:
         if self._query_planner is None or not self._query_planner.enabled:
             return None
-
-        prior_semantic_query = (
-            str(state.get('merged_semantic_query') or state.get('semantic_query') or '')
-            .strip()
-        )
-        prior_comparison_requested = bool(state.get('comparison_requested', False))
-        prior_reset_requested = bool(state.get('reset_requested', False))
-        has_prior_recommendations = len(prior_recommended_ids) > 0
 
         logger.info(
             {
@@ -724,11 +795,7 @@ class AssistantGraphWorkflow:
     @traceable(run_type='tool', name='ai.tool.search_items')
     def _product_retrieval_node(self, state: AssistantGraphState) -> AssistantGraphState:
         _log_node_entered(state, node='product_retrieval')
-        retrieval_query = (
-            state.get('merged_semantic_query')
-            or state.get('semantic_query')
-            or state['query']
-        )
+        semantic_query = str(state.get('semantic_query') or state.get('merged_semantic_query') or '')
         requested_top_k = state.get('budget_top_k', self._search_top_k)
         clamped_top_k = _clamp_int(requested_top_k, min_value=1, max_value=20)
 
@@ -748,7 +815,6 @@ class AssistantGraphWorkflow:
                     'has_price_max': state.get('normalized_filters', {}).get('priceMaxCents') is not None,
                     'has_availability': state.get('normalized_filters', {}).get('availability') is not None,
                     'has_min_rating': state.get('normalized_filters', {}).get('minRating') is not None,
-                    'query_length': len(retrieval_query.strip()),
                 },
                 'budget_top_k': state.get('budget_top_k', self._search_top_k),
                 'budget_top_k_clamped': clamped_top_k,
@@ -758,7 +824,7 @@ class AssistantGraphWorkflow:
         try:
             tool_input = SearchItemsToolInput.model_validate(
                 {
-                    'query': retrieval_query,
+                    'semanticQuery': semantic_query,
                     'retrievalMode': state['retrieval_mode'],
                     'topK': clamped_top_k,
                     'category': state.get('normalized_filters', {}).get('category'),
@@ -770,10 +836,6 @@ class AssistantGraphWorkflow:
                     'minRating': state.get('normalized_filters', {}).get('minRating'),
                 }
             )
-            # TODO(remove): downstream `AssistantTools.search_items` still reparses
-            # `payload.query` and may backfill missing filters from text. With the
-            # current planner-first workflow, this duplicates planning and can drift
-            # from `normalized_filters` decided upstream.
             tool_output = self._tools.search_items(tool_input)
         except ValidationError as exc:
             logger.warning(
@@ -1046,112 +1108,9 @@ class AssistantGraphWorkflow:
             'Want options in a different price range?',
             'Should I focus on in-stock items only?',
         ]
-
         llm_provider = self._synthesizer.provider
         llm_model = self._synthesizer.model_name
-        token_usage_prompt: int | None = None
-        token_usage_completion: int | None = None
-        token_usage_total: int | None = None
-        cost_estimate_usd: float | None = None
-        fallback_reason: str | None = None
-
-        if not self._synthesizer.enabled:
-            fallback_reason = 'disabled'
-            logger.info(
-                {
-                    'event': 'ai.llm_synthesis_fallback',
-                    'request_id': state['request_id'],
-                    'run_id': state['run_id'],
-                    'thread_id': state['thread_id'],
-                    'ai_retrieval_mode': state.get('retrieval_mode'),
-                    'llm_provider': llm_provider,
-                    'llm_model': llm_model,
-                    'latency_ms': 0,
-                    'fallback_reason': fallback_reason,
-                },
-            )
-        else:
-            started_at = perf_counter()
-            logger.info(
-                {
-                    'event': 'ai.llm_synthesis_started',
-                    'request_id': state['request_id'],
-                    'run_id': state['run_id'],
-                    'thread_id': state['thread_id'],
-                    'ai_retrieval_mode': state.get('retrieval_mode'),
-                    'llm_provider': llm_provider,
-                    'llm_model': llm_model,
-                    'budget_top_n_products': state.get('budget_top_n_products'),
-                    'budget_max_output_tokens': state.get('budget_max_output_tokens'),
-                },
-            )
-
-            try:
-                synthesis = self._synthesizer.synthesize(
-                    resolved_request=resolved_request,
-                    retrieval_mode=state.get('retrieval_mode'),
-                    normalized_filters=state.get('normalized_filters', {}),
-                    retrieved_products=retrieved_products,
-                    comparison_summary=comparison_summary,
-                )
-                assistant_message = synthesis.assistant_message
-                token_usage_prompt = synthesis.prompt_tokens
-                token_usage_completion = synthesis.completion_tokens
-                token_usage_total = synthesis.total_tokens
-                cost_estimate_usd = estimate_request_cost_usd(
-                    provider=llm_provider,
-                    model=llm_model,
-                    prompt_tokens=token_usage_prompt,
-                    completion_tokens=token_usage_completion,
-                    total_tokens=token_usage_total,
-                )
-                if synthesis.follow_up_prompts:
-                    follow_up_prompts = synthesis.follow_up_prompts
-                if state.get('comparison_requested') and synthesis.comparison_summary:
-                    comparison_summary = synthesis.comparison_summary
-            except Exception as exc:
-                fallback_reason = type(exc).__name__
-                capture_sentry_exception(
-                    exc,
-                    tags={
-                        'ai_component': 'llm_synthesis',
-                        'llm_provider': llm_provider,
-                        'request_id': state['request_id'],
-                        'run_id': state['run_id'],
-                        'thread_id': state['thread_id'],
-                        'ai_retrieval_mode': str(state.get('retrieval_mode')),
-                    },
-                )
-                logger.warning(
-                    {
-                        'event': 'ai.llm_synthesis_fallback',
-                        'request_id': state['request_id'],
-                        'run_id': state['run_id'],
-                        'thread_id': state['thread_id'],
-                        'ai_retrieval_mode': state.get('retrieval_mode'),
-                        'llm_provider': llm_provider,
-                        'llm_model': llm_model,
-                        'latency_ms': int((perf_counter() - started_at) * 1000),
-                        'fallback_reason': fallback_reason,
-                    },
-                )
-            else:
-                logger.info(
-                    {
-                        'event': 'ai.llm_synthesis_completed',
-                        'request_id': state['request_id'],
-                        'run_id': state['run_id'],
-                        'thread_id': state['thread_id'],
-                        'ai_retrieval_mode': state.get('retrieval_mode'),
-                        'llm_provider': llm_provider,
-                        'llm_model': llm_model,
-                        'latency_ms': int((perf_counter() - started_at) * 1000),
-                        'token_usage_prompt': token_usage_prompt,
-                        'token_usage_completion': token_usage_completion,
-                        'token_usage_total': token_usage_total,
-                        'cost_estimate_usd': cost_estimate_usd,
-                    },
-                )
+        fallback_reason: str | None = state.get('fallback_reason')
 
         logger.info(
             {
@@ -1173,10 +1132,10 @@ class AssistantGraphWorkflow:
             'comparison_summary': comparison_summary,
             'llm_provider': llm_provider,
             'llm_model': llm_model,
-            'token_usage_prompt': token_usage_prompt,
-            'token_usage_completion': token_usage_completion,
-            'token_usage_total': token_usage_total,
-            'cost_estimate_usd': cost_estimate_usd,
+            'token_usage_prompt': None,
+            'token_usage_completion': None,
+            'token_usage_total': None,
+            'cost_estimate_usd': None,
             'fallback_reason': fallback_reason,
         }
 

@@ -25,7 +25,7 @@ flowchart TB
   end
 
   subgraph ai_runtime["AI Runtime (FastAPI)"]
-    ai_routes["/ai/chat + /ai/chat/stream"]
+    ai_routes["/ai/chat/stream"]
     workflow_graph["LangGraph Workflow\n(query planning -> retrieval -> final response)"]
     tools["Search/Compare/Details Tools"]
   end

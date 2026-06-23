@@ -1,17 +1,46 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
+import pytest
+
 from app.schemas import ChatRequest, ChatResponse, FinalRecommendation, ProductItem
-from app.services.chat_service import build_chat_response, build_placeholder_response
+from app.services.chat_service import build_chat_stream_response
 
 
 class _StubWorkflow:
     def __init__(self, response: ChatResponse) -> None:
         self._response = response
-        self.calls: list[ChatRequest] = []
+        self.calls: list[tuple[ChatRequest, str | None]] = []
 
-    def run(self, payload: ChatRequest) -> ChatResponse:
-        self.calls.append(payload)
-        return self._response.model_copy(deep=True)
+    async def prepare_stream_response(self, payload: ChatRequest, *, run_id: str | None = None):
+        self.calls.append((payload, run_id))
+        return SimpleNamespace(
+            chat_response=self._response.model_copy(deep=True),
+            telemetry={
+                'request_id': payload.request_id,
+                'run_id': run_id or f'run-{payload.request_id}',
+                'thread_id': f'{payload.user_context.user_id}:{payload.session_id}',
+                'transport': 'sse',
+                'retrieval_mode': self._response.retrieval_mode,
+                'llm_provider': 'gemini',
+                'llm_model': 'gemini-2.5-flash',
+                'token_usage_prompt': None,
+                'token_usage_completion': None,
+                'token_usage_total': None,
+                'cost_estimate_usd': None,
+                'fallback_reason': None,
+                'budget_top_k': 5,
+                'budget_top_n_products': 3,
+                'budget_max_output_tokens': 220,
+            },
+            synthesis_stream=None,
+        )
+
+
+class _MissingPrepareWorkflow:
+    pass
 
 
 def _payload() -> ChatRequest:
@@ -57,21 +86,7 @@ def _recommended_response() -> ChatResponse:
     )
 
 
-def test_build_placeholder_response_is_deterministic() -> None:
-    payload = _payload()
-
-    result = build_placeholder_response(payload, model_name='gpt-4.1-mini')
-
-    assert result.request_id == 'request-1'
-    assert result.session_id == 'session-1'
-    assert result.placeholder is True
-    assert result.model == 'gpt-4.1-mini'
-    assert result.recommendations == []
-    assert result.recommended_product_ids == []
-    assert len(result.follow_up_prompts) == 2
-
-
-def test_build_chat_response_delegates_to_workflow_and_sets_model(monkeypatch) -> None:
+def test_build_chat_stream_response_delegates_to_prepare_stream_response(monkeypatch) -> None:
     payload = _payload()
     stub_workflow = _StubWorkflow(_recommended_response())
     monkeypatch.setattr(
@@ -79,27 +94,27 @@ def test_build_chat_response_delegates_to_workflow_and_sets_model(monkeypatch) -
         lambda: stub_workflow,
     )
 
-    result, telemetry = build_chat_response(
-        payload,
-        model_name='gpt-4.1-mini',
-        run_id='run-test-1',
-        transport='json',
+    result = asyncio.run(
+        build_chat_stream_response(
+            payload,
+            run_id='run-test-1',
+        )
     )
 
     assert len(stub_workflow.calls) == 1
-    assert stub_workflow.calls[0].request_id == 'request-1'
-    assert result.request_id == payload.request_id
-    assert result.session_id == payload.session_id
-    assert result.placeholder is False
-    assert result.model == 'gpt-4.1-mini'
-    assert result.retrieval_mode == 'hybrid'
-    assert result.recommended_product_ids == ['essential-cropped-tee']
-    assert len(result.recommendations) == 1
-    assert telemetry['run_id'] == 'run-test-1'
-    assert telemetry['thread_id'] == 'user-1:session-1'
+    assert stub_workflow.calls[0][0].request_id == 'request-1'
+    assert stub_workflow.calls[0][1] == 'run-test-1'
+    assert result.run_id == 'run-test-1'
+    assert result.thread_id == 'user-1:session-1'
+    assert result.message_id.startswith('msg-')
+    assert result.chat_response.request_id == payload.request_id
+    assert result.chat_response.session_id == payload.session_id
+    assert result.chat_response.placeholder is False
+    assert result.chat_response.recommended_product_ids == ['essential-cropped-tee']
+    assert result.telemetry['transport'] == 'sse'
 
 
-def test_build_chat_response_preserves_graceful_no_result_shape(monkeypatch) -> None:
+def test_build_chat_stream_response_preserves_graceful_no_result_shape(monkeypatch) -> None:
     payload = _payload()
     stub_workflow = _StubWorkflow(
         ChatResponse(
@@ -119,16 +134,26 @@ def test_build_chat_response_preserves_graceful_no_result_shape(monkeypatch) -> 
         lambda: stub_workflow,
     )
 
-    result, telemetry = build_chat_response(
-        payload,
-        model_name='gpt-4.1-mini',
-        run_id='run-test-2',
-        transport='json',
+    result = asyncio.run(
+        build_chat_stream_response(
+            payload,
+            run_id='run-test-2',
+        )
     )
 
-    assert result.placeholder is False
-    assert result.recommendations == []
-    assert result.recommended_product_ids == []
-    assert result.retrieval_mode == 'structured'
-    assert 'no products found' in result.assistant_message.lower()
-    assert telemetry['run_id'] == 'run-test-2'
+    assert result.chat_response.placeholder is False
+    assert result.chat_response.recommendations == []
+    assert result.chat_response.recommended_product_ids == []
+    assert result.chat_response.retrieval_mode == 'structured'
+    assert 'no products found' in result.chat_response.assistant_message.lower()
+    assert result.telemetry['run_id'] == 'run-test-2'
+
+
+def test_build_chat_stream_response_requires_stream_capable_workflow(monkeypatch) -> None:
+    monkeypatch.setattr(
+        'app.services.chat_service.get_assistant_workflow',
+        lambda: _MissingPrepareWorkflow(),
+    )
+
+    with pytest.raises(RuntimeError, match='prepare_stream_response'):
+        asyncio.run(build_chat_stream_response(_payload(), run_id='run-missing-prepare'))

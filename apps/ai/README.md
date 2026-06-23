@@ -17,10 +17,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ## Endpoints
 
 - `GET /health`
-- `POST /ai/chat`
 - `POST /ai/chat/stream`
 - `GET /v1/health`
-- `POST /v1/ai/chat`
 - `POST /v1/ai/chat/stream`
 
 ## Phase 4.5 tracing toggles
@@ -111,8 +109,8 @@ If deprecated aliases are used, the service logs a startup warning.
 
 - retrieval and product ranking remain tool-driven
 - canonical query updater is planner-first with deterministic fallback
-- LLM synthesis rewrites user-facing `assistantMessage` and `followUpPrompts`
-- synthesis failure falls back to deterministic graph messaging
+- LLM synthesis streams the final user-facing `assistantMessage` over SSE
+- if synthesis is disabled, the stream uses deterministic graph messaging
 - embedding path stays explicitly Gemini-based and unchanged by synthesis migration
 
 Migration note: OpenAI synthesis runtime usage has been removed from `apps/ai`.

@@ -39,10 +39,10 @@ It includes:
 - Order creation with transactional stock revalidation/decrement and idempotent order placement behavior.
 - Async order confirmation email pipeline using BullMQ queue producer and dedicated worker processor.
 - Admin product media upload flow using S3 pre-signed upload URLs.
-- AI gateway proxy endpoints for JSON and SSE transport to the FastAPI AI service, supporting cross-service AI workflow communication.
+- AI gateway proxy endpoint for SSE transport to the FastAPI AI service, supporting cross-service AI workflow communication.
 
 ### Backend - AI API (FastAPI)
-- `POST /ai/chat` and `POST /ai/chat/stream` endpoints (plus `/v1` aliases).
+- `POST /ai/chat/stream` endpoint (plus `/v1` alias).
 - LangGraph-based agent orchestration workflow with explicit planning, retrieval, validation, and synthesis stages.
 - Planner-first query normalization using Gemini with deterministic fallback paths.
 - Hybrid retrieval stack combining structured DB filtering and semantic vector search.
@@ -50,11 +50,11 @@ It includes:
 - Prompt engineering for planner and synthesizer stages using strict system prompts, schema-constrained JSON outputs, and fallback guardrails.
 - Gemini large language model (LLM) integration for query planning and response synthesis with structured JSON outputs and follow-up prompts.
 - Local vector indexing pipeline over catalog products (PostgreSQL -> embeddings -> Chroma).
-- Request/run/thread correlation, token usage telemetry, and transport-aware propagation for troubleshooting and model optimization.
+- Request/run/thread correlation, token usage telemetry, and stream-aware propagation for troubleshooting and model optimization.
 
 ## Observability
 - Request correlation via `x-request-id` across web/API/AI boundaries.
-- AI correlation headers (`x-run-id`, `x-thread-id`) for streaming and non-streaming requests.
+- AI correlation headers (`x-run-id`, `x-thread-id`) for assistant stream requests.
 - Sentry instrumentation across web, core API, and AI service runtimes.
 - LangSmith tracing for AI graph/tool workflows.
 - Structured operational logging for checkout, webhook processing, queue processing, and AI gateway behavior.

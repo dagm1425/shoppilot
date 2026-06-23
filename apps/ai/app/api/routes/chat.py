@@ -8,7 +8,7 @@ from time import perf_counter
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
-from app.config.settings import get_settings
+from app.llm.pricing import estimate_request_cost_usd
 from app.observability import capture_sentry_exception
 from app.request_id import (
     AI_COST_ESTIMATE_HEADER,
@@ -24,85 +24,11 @@ from app.request_id import (
     get_request_id_from_request,
     get_run_id_from_request,
 )
-from app.schemas import ChatRequest, ChatResponse
-from app.services.chat_service import (
-    build_chat_response,
-    build_chat_stream_envelope,
-    build_run_error_event,
-    build_stream_event_sequence,
-)
+from app.schemas import ChatRequest
+from app.services.chat_service import build_chat_stream_response, build_run_error_event
 
 router = APIRouter(tags=['chat'])
 logger = logging.getLogger(__name__)
-
-
-@router.post('/ai/chat', response_model=ChatResponse)
-def post_chat(
-    payload: ChatRequest,
-    request: Request,
-    response: Response,
-) -> ChatResponse:
-    started_at = perf_counter()
-    settings = get_settings()
-
-    effective_request_id = payload.request_id or get_request_id_from_request(request)
-    effective_run_id = get_run_id_from_request(request)
-    response.headers[REQUEST_ID_HEADER] = effective_request_id
-    response.headers[RUN_ID_HEADER] = effective_run_id
-
-    thread_id = f'{payload.user_context.user_id}:{payload.session_id}'
-    response.headers[THREAD_ID_HEADER] = thread_id
-
-    logger.info(
-        {
-            'event': 'ai.chat_request',
-            'request_id': effective_request_id,
-            'run_id': effective_run_id,
-            'thread_id': thread_id,
-            'session_id': payload.session_id,
-            'path': request.url.path,
-            'method': request.method,
-        },
-    )
-
-    try:
-        chat_response, telemetry = build_chat_response(
-            payload,
-            model_name=settings.llm_synthesis_model,
-            run_id=effective_run_id,
-            transport='json',
-        )
-    except Exception:
-        logger.exception(
-            'ai.chat_request_failed',
-            extra={
-                'request_id': effective_request_id,
-                'run_id': effective_run_id,
-                'thread_id': thread_id,
-                'session_id': payload.session_id,
-                'latency_ms': int((perf_counter() - started_at) * 1000),
-                'outcome': 'failure',
-                'transport': 'json',
-            },
-        )
-        raise
-
-    _apply_telemetry_headers(response=response, telemetry=telemetry)
-
-    logger.info(
-        {
-            'event': 'ai.chat_request_completed',
-            'request_id': effective_request_id,
-            'run_id': telemetry.get('run_id', effective_run_id),
-            'thread_id': telemetry.get('thread_id', thread_id),
-            'session_id': payload.session_id,
-            'transport': 'json',
-            'latency_ms': int((perf_counter() - started_at) * 1000),
-            'outcome': 'success',
-        },
-    )
-
-    return chat_response
 
 
 @router.post('/ai/chat/stream')
@@ -111,8 +37,6 @@ async def post_chat_stream(
     request: Request,
     response: Response,
 ) -> StreamingResponse:
-    settings = get_settings()
-
     effective_request_id = payload.request_id or get_request_id_from_request(request)
     effective_run_id = get_run_id_from_request(request)
     response.headers[REQUEST_ID_HEADER] = effective_request_id
@@ -134,9 +58,9 @@ async def post_chat_stream(
     )
 
     try:
-        envelope = build_chat_stream_envelope(
+        # Build the full stream response package: main chat response plus extra metadata (IDs + telemetry).
+        envelope = await build_chat_stream_response(
             payload,
-            model_name=settings.llm_synthesis_model,
             run_id=effective_run_id,
         )
     except Exception as exc:
@@ -173,19 +97,16 @@ async def post_chat_stream(
     _apply_telemetry_headers(response=response, telemetry=envelope.telemetry)
     response.headers[THREAD_ID_HEADER] = envelope.thread_id
 
-    events = build_stream_event_sequence(
-        run_id=envelope.run_id,
-        message_id=envelope.message_id,
-        thread_id=envelope.thread_id,
-        chat_response=envelope.chat_response,
-    )
-
     async def stream_events() -> AsyncIterator[bytes]:
         run_id = envelope.run_id
         started_at = perf_counter()
+        final_response = envelope.chat_response.model_copy(deep=True)
+        synthesis_stream = envelope.synthesis_stream
 
         try:
             if await request.is_disconnected():
+                if synthesis_stream is not None:
+                    await synthesis_stream.aclose()
                 logger.info(
                     {
                         'event': 'ai.chat_stream_disconnected_before_start',
@@ -197,22 +118,101 @@ async def post_chat_stream(
                 )
                 return
 
-            for event in events:
-                if await request.is_disconnected():
-                    logger.info(
+            yield _encode_sse_event(
+                'RUN_STARTED',
+                {
+                    'type': 'RUN_STARTED',
+                    'threadId': envelope.thread_id,
+                    'runId': run_id,
+                },
+            )
+            yield _encode_sse_event(
+                'TEXT_MESSAGE_START',
+                {
+                    'type': 'TEXT_MESSAGE_START',
+                    'messageId': envelope.message_id,
+                    'role': 'assistant',
+                },
+            )
+
+            if synthesis_stream is not None:
+                async for delta in synthesis_stream:
+                    if await request.is_disconnected():
+                        await synthesis_stream.aclose()
+                        logger.info(
+                            {
+                                'event': 'ai.chat_stream_disconnected',
+                                'request_id': effective_request_id,
+                                'session_id': payload.session_id,
+                                'run_id': run_id,
+                                'thread_id': envelope.thread_id,
+                                'latency_ms': int((perf_counter() - started_at) * 1000),
+                                'outcome': 'client_disconnected',
+                            },
+                        )
+                        return
+
+                    if delta == '':
+                        continue
+
+                    yield _encode_sse_event(
+                        'TEXT_MESSAGE_CONTENT',
                         {
-                            'event': 'ai.chat_stream_disconnected',
-                            'request_id': effective_request_id,
-                            'session_id': payload.session_id,
-                            'run_id': run_id,
-                            'thread_id': envelope.thread_id,
-                            'latency_ms': int((perf_counter() - started_at) * 1000),
-                            'outcome': 'client_disconnected',
+                            'type': 'TEXT_MESSAGE_CONTENT',
+                            'messageId': envelope.message_id,
+                            'delta': delta,
                         },
                     )
-                    return
 
-                yield _encode_sse_event(event['type'], event)
+                final_response.assistant_message = synthesis_stream.assistant_message
+                if len(final_response.recommendations) > 0:
+                    final_response.recommendations[0].summary = final_response.assistant_message
+                envelope.telemetry['token_usage_prompt'] = synthesis_stream.prompt_tokens
+                envelope.telemetry['token_usage_completion'] = synthesis_stream.completion_tokens
+                envelope.telemetry['token_usage_total'] = synthesis_stream.total_tokens
+                envelope.telemetry['cost_estimate_usd'] = estimate_request_cost_usd(
+                    provider=str(envelope.telemetry.get('llm_provider') or ''),
+                    model=str(envelope.telemetry.get('llm_model') or ''),
+                    prompt_tokens=synthesis_stream.prompt_tokens,
+                    completion_tokens=synthesis_stream.completion_tokens,
+                    total_tokens=synthesis_stream.total_tokens,
+                )
+            elif final_response.assistant_message.strip() != '':
+                if len(final_response.recommendations) > 0:
+                    final_response.recommendations[0].summary = final_response.assistant_message
+                yield _encode_sse_event(
+                    'TEXT_MESSAGE_CONTENT',
+                    {
+                        'type': 'TEXT_MESSAGE_CONTENT',
+                        'messageId': envelope.message_id,
+                        'delta': final_response.assistant_message,
+                    },
+                )
+
+            yield _encode_sse_event(
+                'TEXT_MESSAGE_END',
+                {
+                    'type': 'TEXT_MESSAGE_END',
+                    'messageId': envelope.message_id,
+                },
+            )
+            yield _encode_sse_event(
+                'STATE_SNAPSHOT',
+                {
+                    'type': 'STATE_SNAPSHOT',
+                    'state': {
+                        'chatResponse': final_response.model_dump(by_alias=True, mode='json'),
+                    },
+                },
+            )
+            yield _encode_sse_event(
+                'RUN_FINISHED',
+                {
+                    'type': 'RUN_FINISHED',
+                    'threadId': envelope.thread_id,
+                    'runId': run_id,
+                },
+            )
 
             logger.info(
                 {
@@ -260,6 +260,9 @@ async def post_chat_stream(
                 message='Assistant service failed to complete the stream.',
             )
             yield _encode_sse_event('RUN_ERROR', error_event)
+        finally:
+            if synthesis_stream is not None:
+                await synthesis_stream.aclose()
 
     return StreamingResponse(
         stream_events(),

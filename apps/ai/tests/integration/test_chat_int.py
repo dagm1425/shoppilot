@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,8 +19,9 @@ from app.schemas import (
 
 
 class _StubWorkflow:
-    def __init__(self, response: ChatResponse) -> None:
+    def __init__(self, response: ChatResponse, *, stream_chunks: list[str] | None = None) -> None:
         self._response = response
+        self._stream_chunks = stream_chunks
         self.calls: list[ChatRequest] = []
 
     def run(self, payload: ChatRequest) -> ChatResponse:
@@ -29,6 +31,58 @@ class _StubWorkflow:
         response.session_id = payload.session_id
         return response
 
+    async def prepare_stream_response(self, payload: ChatRequest, *, run_id: str | None = None):
+        response = self.run(payload)
+        response.model = 'gemini-2.5-flash'
+        telemetry = {
+            'request_id': payload.request_id,
+            'run_id': run_id or f'run-{payload.request_id}',
+            'thread_id': f'{payload.user_context.user_id}:{payload.session_id}',
+            'transport': 'sse',
+            'retrieval_mode': response.retrieval_mode,
+            'llm_provider': 'gemini',
+            'llm_model': 'gemini-2.5-flash',
+            'token_usage_prompt': None,
+            'token_usage_completion': None,
+            'token_usage_total': None,
+            'cost_estimate_usd': None,
+            'fallback_reason': None,
+            'budget_top_k': 5,
+            'budget_top_n_products': 3,
+            'budget_max_output_tokens': 220,
+        }
+        synthesis_stream = None
+        if self._stream_chunks is not None:
+            synthesis_stream = _StubSynthesisStream(self._stream_chunks)
+        return SimpleNamespace(
+            chat_response=response,
+            telemetry=telemetry,
+            synthesis_stream=synthesis_stream,
+        )
+
+
+class _StubSynthesisStream:
+    def __init__(self, chunks: list[str]) -> None:
+        self._chunks = list(chunks)
+        self.assistant_message = ''
+        self.prompt_tokens = 12
+        self.completion_tokens = 9
+        self.total_tokens = 21
+        self.closed = False
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        buffered: list[str] = []
+        for chunk in self._chunks:
+            buffered.append(chunk)
+            yield chunk
+        self.assistant_message = ''.join(buffered).strip()
+
+    async def aclose(self) -> None:
+        self.closed = True
+
 
 class _NoopSynthesizer:
     provider = 'gemini'
@@ -36,9 +90,6 @@ class _NoopSynthesizer:
     model_name = 'gemini-2.5-flash'
     max_tokens = 220
     top_n_products = 3
-
-    def synthesize(self, **kwargs):  # noqa: ANN003, ANN204
-        raise RuntimeError('disabled')
 
 
 class _StubPlanner:
@@ -276,7 +327,16 @@ def _parse_sse_events(raw_payload: str) -> list[tuple[str, dict[str, object]]]:
     return events
 
 
-def test_chat_returns_typed_recommendation_response(
+def _extract_snapshot_chat_response(events: list[tuple[str, dict[str, object]]]) -> dict[str, object]:
+    snapshot_payload = next(payload for event_name, payload in events if event_name == 'STATE_SNAPSHOT')
+    state = snapshot_payload.get('state')
+    assert isinstance(state, dict)
+    chat_response = state.get('chatResponse')
+    assert isinstance(chat_response, dict)
+    return chat_response
+
+
+def test_chat_stream_returns_typed_recommendation_snapshot(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -287,7 +347,7 @@ def test_chat_returns_typed_recommendation_response(
     )
 
     response = client.post(
-        '/ai/chat',
+        '/ai/chat/stream',
         json={
             'message': 'Recommend running tops',
             'sessionId': 'session-1',
@@ -297,7 +357,8 @@ def test_chat_returns_typed_recommendation_response(
     )
 
     assert response.status_code == 200
-    payload = response.json()
+    events = _parse_sse_events(response.text)
+    payload = _extract_snapshot_chat_response(events)
 
     assert payload['requestId'] == 'request-1'
     assert payload['sessionId'] == 'session-1'
@@ -311,7 +372,7 @@ def test_chat_returns_typed_recommendation_response(
     assert len(stub_workflow.calls) == 1
 
 
-def test_chat_returns_graceful_no_match_response(
+def test_chat_stream_returns_graceful_no_match_snapshot(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -322,7 +383,7 @@ def test_chat_returns_graceful_no_match_response(
     )
 
     response = client.post(
-        '/ai/chat',
+        '/ai/chat/stream',
         json={
             'message': 'bottoms under $10',
             'sessionId': 'session-empty',
@@ -332,7 +393,8 @@ def test_chat_returns_graceful_no_match_response(
     )
 
     assert response.status_code == 200
-    payload = response.json()
+    events = _parse_sse_events(response.text)
+    payload = _extract_snapshot_chat_response(events)
     assert payload['placeholder'] is False
     assert payload['retrievalMode'] == 'structured'
     assert payload['recommendations'] == []
@@ -341,7 +403,7 @@ def test_chat_returns_graceful_no_match_response(
     assert len(stub_workflow.calls) == 1
 
 
-def test_chat_request_id_header_is_echoed_from_inbound_header(
+def test_chat_stream_request_id_header_is_echoed_from_inbound_header(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -352,7 +414,7 @@ def test_chat_request_id_header_is_echoed_from_inbound_header(
     )
 
     response = client.post(
-        '/ai/chat',
+        '/ai/chat/stream',
         headers={'x-request-id': 'external-request-id'},
         json={
             'message': 'Recommend running tops',
@@ -367,7 +429,7 @@ def test_chat_request_id_header_is_echoed_from_inbound_header(
     assert len(stub_workflow.calls) == 1
 
 
-def test_chat_follow_up_refinement_in_same_session_updates_recommendations(
+def test_chat_stream_follow_up_refinement_in_same_session_updates_recommendations(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -380,7 +442,7 @@ def test_chat_follow_up_refinement_in_same_session_updates_recommendations(
     monkeypatch.setattr('app.services.chat_service.get_assistant_workflow', lambda: workflow)
 
     first_response = client.post(
-        '/ai/chat',
+        '/ai/chat/stream',
         json={
             'message': 'Show me in-stock tops under $80 with rating at least 4.',
             'sessionId': 'session-follow-up',
@@ -389,7 +451,7 @@ def test_chat_follow_up_refinement_in_same_session_updates_recommendations(
         },
     )
     second_response = client.post(
-        '/ai/chat',
+        '/ai/chat/stream',
         json={
             'message': 'Make those for men and premium',
             'sessionId': 'session-follow-up',
@@ -400,8 +462,8 @@ def test_chat_follow_up_refinement_in_same_session_updates_recommendations(
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
-    first_payload = first_response.json()
-    second_payload = second_response.json()
+    first_payload = _extract_snapshot_chat_response(_parse_sse_events(first_response.text))
+    second_payload = _extract_snapshot_chat_response(_parse_sse_events(second_response.text))
     assert first_payload['recommendedProductIds'] == ['essential-cropped-tee']
     assert second_payload['recommendedProductIds'] == ['pro-performance-tank']
     assert tools.search_calls == 2
@@ -411,7 +473,7 @@ def test_chat_follow_up_refinement_in_same_session_updates_recommendations(
     assert second_call_input.price_max_cents is None
 
 
-def test_chat_three_turn_follow_up_uses_updater_state_and_replaces_semantic_intent(
+def test_chat_stream_three_turn_follow_up_uses_updater_state_and_replaces_semantic_intent(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -459,7 +521,7 @@ def test_chat_three_turn_follow_up_uses_updater_state_and_replaces_semantic_inte
     monkeypatch.setattr('app.services.chat_service.get_assistant_workflow', lambda: workflow)
 
     turn_one = client.post(
-        '/ai/chat',
+        '/ai/chat/stream',
         json={
             'message': 'Show me in-stock tops under $80 with rating at least 4 for men.',
             'sessionId': 'session-follow-up-3turn',
@@ -468,7 +530,7 @@ def test_chat_three_turn_follow_up_uses_updater_state_and_replaces_semantic_inte
         },
     )
     turn_two = client.post(
-        '/ai/chat',
+        '/ai/chat/stream',
         json={
             'message': 'Make those premium.',
             'sessionId': 'session-follow-up-3turn',
@@ -477,7 +539,7 @@ def test_chat_three_turn_follow_up_uses_updater_state_and_replaces_semantic_inte
         },
     )
     turn_three = client.post(
-        '/ai/chat',
+        '/ai/chat/stream',
         json={
             'message': 'Now make those for cold weather only.',
             'sessionId': 'session-follow-up-3turn',
@@ -489,18 +551,18 @@ def test_chat_three_turn_follow_up_uses_updater_state_and_replaces_semantic_inte
     assert turn_one.status_code == 200
     assert turn_two.status_code == 200
     assert turn_three.status_code == 200
-    assert turn_one.json()['recommendedProductIds'] == ['essential-cropped-tee']
-    assert turn_two.json()['recommendedProductIds'] == ['pro-performance-tank']
-    assert turn_three.json()['recommendedProductIds'] == ['thermal-fleece-sweater']
+    assert _extract_snapshot_chat_response(_parse_sse_events(turn_one.text))['recommendedProductIds'] == ['essential-cropped-tee']
+    assert _extract_snapshot_chat_response(_parse_sse_events(turn_two.text))['recommendedProductIds'] == ['pro-performance-tank']
+    assert _extract_snapshot_chat_response(_parse_sse_events(turn_three.text))['recommendedProductIds'] == ['thermal-fleece-sweater']
     assert tools.search_calls == 3
     assert len(planner.calls) == 3
     assert planner.calls[2]['prior_semantic_query'] == 'premium men tops'
     third_call_input = tools.search_inputs[2]
     assert third_call_input.thermal_profile == 'cold_weather'
-    assert third_call_input.query == 'cold weather men tops'
+    assert third_call_input.semantic_query == 'cold weather men tops'
 
 
-def test_chat_versioned_route_returns_same_contract(
+def test_chat_stream_versioned_route_returns_same_contract(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -511,7 +573,7 @@ def test_chat_versioned_route_returns_same_contract(
     )
 
     response = client.post(
-        '/v1/ai/chat',
+        '/v1/ai/chat/stream',
         json={
             'message': 'Recommend neutral jackets',
             'sessionId': 'session-2',
@@ -521,7 +583,7 @@ def test_chat_versioned_route_returns_same_contract(
     )
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = _extract_snapshot_chat_response(_parse_sse_events(response.text))
     assert payload['requestId'] == 'request-2'
     assert payload['sessionId'] == 'session-2'
     assert payload['placeholder'] is False
@@ -532,7 +594,10 @@ def test_chat_stream_returns_ordered_ag_ui_text_events(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stub_workflow = _StubWorkflow(_recommended_response())
+    stub_workflow = _StubWorkflow(
+        _recommended_response(),
+        stream_chunks=['I found two ', 'options that ', 'match your constraints.'],
+    )
     monkeypatch.setattr(
         'app.services.chat_service.get_assistant_workflow',
         lambda: stub_workflow,
@@ -566,9 +631,17 @@ def test_chat_stream_returns_ordered_ag_ui_text_events(
     for event_name, payload in events:
         assert payload['type'] == event_name
 
+    content_deltas = [
+        payload['delta']
+        for event_name, payload in events
+        if event_name == 'TEXT_MESSAGE_CONTENT'
+    ]
+    assert content_deltas == ['I found two ', 'options that ', 'match your constraints.']
+
     snapshot_payload = next(payload for event_name, payload in events if event_name == 'STATE_SNAPSHOT')
     assert isinstance(snapshot_payload.get('state'), dict)
     assert isinstance(snapshot_payload['state'].get('chatResponse'), dict)
+    assert snapshot_payload['state']['chatResponse']['assistantMessage'] == 'I found two options that match your constraints.'
 
 
 def test_chat_stream_emits_run_error_event_on_failure(
@@ -576,7 +649,7 @@ def test_chat_stream_emits_run_error_event_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _FailingWorkflow:
-        def run(self, _payload: ChatRequest) -> ChatResponse:
+        async def prepare_stream_response(self, _payload: ChatRequest, *, run_id: str | None = None):
             raise RuntimeError('graph failed')
 
     monkeypatch.setattr(

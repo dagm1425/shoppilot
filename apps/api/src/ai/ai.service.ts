@@ -11,9 +11,7 @@ import { REQUEST_ID_HEADER, type RequestWithContext } from '../common/request-co
 import { parseEnv } from '../config/env.js';
 import {
   aiUpstreamChatRequestSchema,
-  parseAiUpstreamResponseOrThrow,
   type AiChatRequest,
-  type AiChatResponse,
 } from './ai.schemas.js';
 
 const RUN_ID_HEADER = 'x-run-id';
@@ -75,88 +73,6 @@ export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly env = parseEnv(process.env);
 
-  async chat(input: AiChatRequest, request: RequestWithContext): Promise<AiChatResponse> {
-    const startedAt = Date.now();
-    const context = this.buildUpstreamProxyContext(input, request);
-    this.captureObservabilityProbeIfRequested(request, context.requestId, 'json');
-
-    let upstreamResponse: Response;
-    try {
-      const upstream = await this.openUpstreamRequest(
-        '/ai/chat',
-        context.upstreamPayload,
-        context.requestId,
-        context.runId,
-      );
-      upstreamResponse = upstream.response;
-      upstream.cleanupTimeout();
-    } catch (error) {
-      this.handleUpstreamRequestError({
-        error,
-        route: '/ai/chat',
-        requestId: context.requestId,
-        runId: context.runId,
-        threadId: context.threadId,
-        sessionId: context.sessionId,
-        userOrIpKey: context.userOrIpKey,
-        startedAt,
-        transport: 'json',
-      });
-    }
-
-    if (!upstreamResponse.ok) {
-      const upstreamError = await this.parseUpstreamError(upstreamResponse);
-      const mapped = this.mapUpstreamStatus(upstreamResponse.status);
-
-      this.logGatewayEvent({
-        route: '/ai/chat',
-        requestId: context.requestId,
-        runId: context.runId,
-        threadId: context.threadId,
-        sessionId: context.sessionId,
-        userOrIpKey: context.userOrIpKey,
-        status: mapped.status,
-        latencyMs: Date.now() - startedAt,
-        outcome: mapped.code,
-        upstreamStatus: upstreamResponse.status,
-        upstreamCode: upstreamError.error?.code,
-      });
-      this.captureMappedGatewayException(
-        new Error(`AI upstream returned non-ok status: ${upstreamResponse.status}`),
-        mapped.errorType,
-        context.requestId,
-        'json',
-        context.runId,
-        context.threadId,
-      );
-
-      this.throwMappedGatewayError(mapped);
-    }
-
-    const responsePayload = await this.parseUpstreamSuccessPayload(upstreamResponse);
-    const telemetry = this.extractUpstreamTelemetry(upstreamResponse.headers, context);
-
-    this.logGatewayEvent({
-      route: '/ai/chat',
-      requestId: context.requestId,
-      runId: telemetry.runId,
-      threadId: telemetry.threadId,
-      sessionId: responsePayload.sessionId,
-      userOrIpKey: context.userOrIpKey,
-      status: HttpStatus.OK,
-      latencyMs: Date.now() - startedAt,
-      outcome: 'success',
-      transport: 'json',
-      provider: telemetry.provider,
-      model: telemetry.model,
-      tokenUsage: telemetry.tokenUsage,
-      costEstimateUsd: telemetry.costEstimateUsd,
-      fallbackReason: telemetry.fallbackReason,
-    });
-
-    return responsePayload;
-  }
-
   async chatStream(
     input: AiChatRequest,
     request: RequestWithContext,
@@ -164,7 +80,7 @@ export class AiService {
   ): Promise<void> {
     const startedAt = Date.now();
     const context = this.buildUpstreamProxyContext(input, request);
-    this.captureObservabilityProbeIfRequested(request, context.requestId, 'sse');
+    this.captureObservabilityProbeIfRequested(request, context.requestId);
 
     this.logger.log({
       event: 'ai.gateway.stream_started',
@@ -188,14 +104,12 @@ export class AiService {
     } catch (error) {
       this.handleUpstreamRequestError({
         error,
-        route: '/ai/chat/stream',
         requestId: context.requestId,
         runId: context.runId,
         threadId: context.threadId,
         sessionId: context.sessionId,
         userOrIpKey: context.userOrIpKey,
         startedAt,
-        transport: 'sse',
       });
     }
 
@@ -386,7 +300,7 @@ export class AiService {
   }
 
   private async openUpstreamRequest(
-    path: '/ai/chat' | '/ai/chat/stream',
+    path: '/ai/chat/stream',
     body: unknown,
     requestId: string,
     runId: string,
@@ -417,24 +331,6 @@ export class AiService {
       clearTimeout(timeout);
       throw error;
     }
-  }
-
-  private async parseUpstreamSuccessPayload(response: Response): Promise<AiChatResponse> {
-    let payload: unknown;
-
-    try {
-      payload = await response.json();
-    } catch {
-      throw new HttpException(
-        {
-          code: 'AI_UPSTREAM_RESPONSE_INVALID',
-          message: 'Assistant service returned an unreadable response.',
-        },
-        HttpStatus.BAD_GATEWAY,
-      );
-    }
-
-    return parseAiUpstreamResponseOrThrow(payload);
   }
 
   private async parseUpstreamError(response: Response): Promise<AiUpstreamErrorPayload> {
@@ -520,14 +416,12 @@ export class AiService {
 
   private handleUpstreamRequestError(input: {
     error: unknown;
-    route: '/ai/chat' | '/ai/chat/stream';
     requestId: string;
     runId: string;
     threadId: string;
     sessionId: string;
     userOrIpKey: string;
     startedAt: number;
-    transport: 'json' | 'sse';
   }): never {
     const isTimeout = this.isAbortLikeError(input.error);
     const mapped = isTimeout
@@ -545,7 +439,7 @@ export class AiService {
         } satisfies GatewayErrorMapping);
 
     this.logGatewayEvent({
-      route: input.route,
+      route: '/ai/chat/stream',
       requestId: input.requestId,
       runId: input.runId,
       threadId: input.threadId,
@@ -554,13 +448,13 @@ export class AiService {
       status: mapped.status,
       latencyMs: Date.now() - input.startedAt,
       outcome: mapped.code,
-      transport: input.transport,
+      transport: 'sse',
     });
     this.captureMappedGatewayException(
       input.error instanceof Error ? input.error : new Error('AI gateway upstream fetch failed.'),
       mapped.errorType,
       input.requestId,
-      input.transport,
+      'sse',
       input.runId,
       input.threadId,
     );
@@ -613,7 +507,7 @@ export class AiService {
     error: Error,
     errorType: string,
     requestId: string,
-    transport: 'json' | 'sse',
+    transport: 'sse',
     runId?: string,
     threadId?: string,
   ): void {
@@ -635,7 +529,6 @@ export class AiService {
   private captureObservabilityProbeIfRequested(
     request: RequestWithContext,
     requestId: string,
-    transport: 'json' | 'sse',
   ): void {
     if (this.env.NODE_ENV === 'production') {
       return;
@@ -649,12 +542,12 @@ export class AiService {
       new Error('AI gateway observability probe triggered.'),
       'observability_probe',
       requestId,
-      transport,
+      'sse',
     );
   }
 
   private logGatewayEvent(input: {
-    route: '/ai/chat' | '/ai/chat/stream';
+    route: '/ai/chat/stream';
     requestId: string;
     runId: string;
     threadId: string;
@@ -663,7 +556,7 @@ export class AiService {
     status: number;
     latencyMs: number;
     outcome: string;
-    transport?: 'json' | 'sse';
+    transport?: 'sse';
     upstreamStatus?: number;
     upstreamCode?: string;
     provider?: string | null;
@@ -688,7 +581,7 @@ export class AiService {
       status: input.status,
       latency_ms: input.latencyMs,
       outcome: input.outcome,
-      transport: input.transport ?? 'json',
+      transport: input.transport ?? 'sse',
       llm_provider: input.provider,
       llm_model: input.model,
       token_usage_prompt: input.tokenUsage?.prompt ?? null,

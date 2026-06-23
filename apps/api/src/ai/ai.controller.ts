@@ -25,31 +25,6 @@ const env = parseEnv(process.env);
 export class AiController {
   constructor(@Inject(AiService) private readonly aiService: AiService) {}
 
-  @Post('chat')
-  @UseGuards(OptionalJwtAuthGuard, AiThrottlerGuard)
-  @Throttle({
-    default: {
-      limit: env.AI_RATE_LIMIT_MAX,
-      ttl: env.AI_RATE_LIMIT_TTL_SEC * 1_000,
-    },
-  })
-  async chat(@Body() body: unknown, @Req() request: RequestWithContext) {
-    const input = parseAiChatRequestOrThrow(body);
-
-    Sentry.setTag('flow', 'ai_assistant');
-    if (request.requestId) {
-      Sentry.setTag('request_id', request.requestId);
-    }
-
-    return Sentry.startSpan(
-      {
-        name: 'ai.gateway.chat',
-        op: 'http.server',
-      },
-      async () => this.aiService.chat(input, request),
-    );
-  }
-
   @Post('chat/stream')
   @HttpCode(HttpStatus.OK)
   @UseGuards(OptionalJwtAuthGuard, AiThrottlerGuard)

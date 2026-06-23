@@ -28,7 +28,7 @@ Architecture diagrams:
 - Worker runtime (`apps/api/src/worker/bootstrap.ts`) runs BullMQ processors for async jobs.
 
 ### AI Service (`apps/ai`)
-- FastAPI service exposing `/ai/chat`, `/ai/chat/stream` and `/v1` aliases.
+- FastAPI service exposing `/ai/chat/stream` and `/v1` alias.
 - Runs LangGraph workflow for planning, retrieval, validation, and response synthesis.
 - Owns AI-specific orchestration, retrieval quality logic, and model/tool usage.
 

@@ -27,9 +27,9 @@ sequenceDiagram
   T->>CH: Vector similarity query
   T-->>G: ranked products + retrieval metadata
 
-  G->>GM: Synthesize assistant response JSON
+  G->>GM: Start final answer synthesis stream
   alt Synthesis succeeds
-    GM-->>G: assistantMessage + prompts + token usage
+    GM-->>G: assistant text deltas + token usage
   else Planner/synthesis failure
     G->>G: Deterministic fallback messaging
   end

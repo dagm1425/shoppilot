@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+
+import pytest
+
 from app.graph.workflow import AssistantGraphWorkflow
 from app.llm.planner import QueryPlannerOutput
-from app.llm.synthesizer import AssistantSynthesisResult
 from app.schemas import (
     ChatRequest,
+    ChatResponse,
     CompareItemsToolOutput,
     GetItemDetailsToolOutput,
     NormalizedFilters,
@@ -64,7 +68,10 @@ class _StubSynthesizer:
         *,
         provider: str = 'gemini',
         enabled: bool = False,
-        result: AssistantSynthesisResult | None = None,
+        assistant_message: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
         should_raise: bool = False,
     ) -> None:
         self.provider = provider
@@ -72,11 +79,14 @@ class _StubSynthesizer:
         self.model_name = 'gemini-2.5-flash'
         self.max_tokens = 220
         self.top_n_products = 3
-        self.result = result
+        self.assistant_message = assistant_message
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
         self.should_raise = should_raise
         self.calls: list[dict[str, object]] = []
 
-    def synthesize(
+    async def synthesize_stream(
         self,
         *,
         resolved_request: str,
@@ -84,7 +94,7 @@ class _StubSynthesizer:
         normalized_filters: dict[str, object],
         retrieved_products: list[dict[str, object]],
         comparison_summary: str | None,
-    ) -> AssistantSynthesisResult:
+    ) -> _StubSynthesisStream:
         self.calls.append(
             {
                 'resolved_request': resolved_request,
@@ -96,9 +106,43 @@ class _StubSynthesizer:
         )
         if self.should_raise:
             raise RuntimeError('synthetic synthesis failure')
-        if self.result is None:
+        if self.assistant_message is None:
             raise RuntimeError('stub synthesis result missing')
-        return self.result
+        return _StubSynthesisStream(
+            deltas=[self.assistant_message],
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+            total_tokens=self.total_tokens,
+        )
+
+
+class _StubSynthesisStream:
+    def __init__(
+        self,
+        *,
+        deltas: list[str],
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
+    ) -> None:
+        self._deltas = list(deltas)
+        self.assistant_message = ''
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        buffered: list[str] = []
+        for delta in self._deltas:
+            buffered.append(delta)
+            yield delta
+        self.assistant_message = ''.join(buffered).strip()
+
+    async def aclose(self) -> None:
+        return None
 
 
 class _StubPlanner:
@@ -237,6 +281,37 @@ def _planner_output(
     )
 
 
+def _run_workflow_response(
+    workflow: AssistantGraphWorkflow,
+    payload: ChatRequest,
+) -> ChatResponse:
+    response, _streamed_deltas = _run_workflow_response_with_deltas(workflow, payload)
+    return response
+
+
+def _run_workflow_response_with_deltas(
+    workflow: AssistantGraphWorkflow,
+    payload: ChatRequest,
+) -> tuple[ChatResponse, list[str]]:
+    prepared = asyncio.run(workflow.prepare_stream_response(payload))
+    final_response = prepared.chat_response.model_copy(deep=True)
+    streamed_deltas: list[str] = []
+
+    if prepared.synthesis_stream is not None:
+        async def _collect_stream() -> list[str]:
+            deltas: list[str] = []
+            async for delta in prepared.synthesis_stream:
+                deltas.append(delta)
+            return deltas
+
+        streamed_deltas = asyncio.run(_collect_stream())
+        final_response.assistant_message = prepared.synthesis_stream.assistant_message
+        if len(final_response.recommendations) > 0:
+            final_response.recommendations[0].summary = final_response.assistant_message
+
+    return final_response, streamed_deltas
+
+
 def test_workflow_run_returns_structured_recommendations() -> None:
     first = _product(
         product_id='essential-cropped-tee',
@@ -263,7 +338,7 @@ def test_workflow_run_returns_structured_recommendations() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    response = workflow.run(
+    response = _run_workflow_response(workflow, 
         _chat_payload(
             message='show available workout tops under 50 dollars',
             session_id='session-1',
@@ -291,7 +366,7 @@ def test_workflow_retry_path_is_bounded_to_single_retry() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    response = workflow.run(
+    response = _run_workflow_response(workflow, 
         _chat_payload(
             message='recommend tops under 30',
             session_id='session-retry',
@@ -386,7 +461,7 @@ def test_workflow_reuses_memory_for_same_thread_compare_follow_up() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    first_turn = workflow.run(
+    first_turn = _run_workflow_response(workflow, 
         _chat_payload(
             message='find breathable training tops under 60',
             session_id='session-memory',
@@ -394,7 +469,7 @@ def test_workflow_reuses_memory_for_same_thread_compare_follow_up() -> None:
             user_id='user-1',
         )
     )
-    second_turn = workflow.run(
+    second_turn = _run_workflow_response(workflow, 
         _chat_payload(
             message='now compare the top two options',
             session_id='session-memory',
@@ -441,7 +516,7 @@ def test_workflow_isolates_memory_between_sessions() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='find breathable training tops under 60',
             session_id='session-a',
@@ -449,7 +524,7 @@ def test_workflow_isolates_memory_between_sessions() -> None:
             user_id='user-1',
         )
     )
-    isolated_turn = workflow.run(
+    isolated_turn = _run_workflow_response(workflow, 
         _chat_payload(
             message='now compare the top two options',
             session_id='session-b',
@@ -477,11 +552,7 @@ def test_workflow_applies_llm_synthesis_when_available() -> None:
     )
     synthesizer = _StubSynthesizer(
         enabled=True,
-        result=AssistantSynthesisResult(
-            assistant_message='Top match: Essential Cropped Tee for breathable training.',
-            follow_up_prompts=['Need lower-priced options?', 'Want only in-stock picks?'],
-            comparison_summary=None,
-        ),
+        assistant_message='Top match: Essential Cropped Tee for breathable training.',
     )
     workflow = AssistantGraphWorkflow(
         tools=tools,
@@ -489,7 +560,7 @@ def test_workflow_applies_llm_synthesis_when_available() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    response = workflow.run(
+    response, streamed_deltas = _run_workflow_response_with_deltas(workflow, 
         _chat_payload(
             message='show available workout tops under 50 dollars',
             session_id='session-llm-1',
@@ -499,9 +570,10 @@ def test_workflow_applies_llm_synthesis_when_available() -> None:
     )
 
     assert response.assistant_message == 'Top match: Essential Cropped Tee for breathable training.'
+    assert streamed_deltas == ['Top match: Essential Cropped Tee for breathable training.']
     assert response.follow_up_prompts == [
-        'Need lower-priced options?',
-        'Want only in-stock picks?',
+        'Want options in a different price range?',
+        'Should I focus on in-stock items only?',
     ]
     assert len(synthesizer.calls) == 1
     assert synthesizer.calls[0]['resolved_request'].startswith('recommend ')
@@ -511,7 +583,7 @@ def test_workflow_applies_llm_synthesis_when_available() -> None:
     assert synthesizer.calls[0]['retrieval_mode'] == 'structured'
 
 
-def test_workflow_keeps_deterministic_output_when_synthesis_fails() -> None:
+def test_workflow_stream_setup_raises_when_synthesis_stream_creation_fails() -> None:
     first = _product(
         product_id='essential-cropped-tee',
         name='Essential Cropped Tee',
@@ -528,21 +600,16 @@ def test_workflow_keeps_deterministic_output_when_synthesis_fails() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    response = workflow.run(
-        _chat_payload(
-            message='show available workout tops under 50 dollars',
-            session_id='session-llm-fallback',
-            request_id='request-llm-fallback',
-            user_id='user-1',
+    with pytest.raises(RuntimeError, match='synthetic synthesis failure'):
+        _run_workflow_response(
+            workflow,
+            _chat_payload(
+                message='show available workout tops under 50 dollars',
+                session_id='session-llm-fallback',
+                request_id='request-llm-fallback',
+                user_id='user-1',
+            )
         )
-    )
-
-    assert response.placeholder is False
-    assert 'matching products using structured retrieval' in response.assistant_message
-    assert response.follow_up_prompts == [
-        'Want options in a different price range?',
-        'Should I focus on in-stock items only?',
-    ]
 
 
 def test_workflow_turn_two_refinement_triggers_fresh_retrieval() -> None:
@@ -635,7 +702,7 @@ def test_workflow_turn_two_refinement_triggers_fresh_retrieval() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    first_turn = workflow.run(
+    first_turn = _run_workflow_response(workflow, 
         _chat_payload(
             message='Show me in-stock tops under $80 with rating at least 4.',
             session_id='session-refine',
@@ -643,7 +710,7 @@ def test_workflow_turn_two_refinement_triggers_fresh_retrieval() -> None:
             user_id='user-1',
         )
     )
-    second_turn = workflow.run(
+    second_turn = _run_workflow_response(workflow, 
         _chat_payload(
             message='Make those for men and premium.',
             session_id='session-refine',
@@ -696,7 +763,7 @@ def test_workflow_compare_with_refinement_does_not_skip_retrieval() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='find breathable training tops under 60',
             session_id='session-compare-refine',
@@ -704,7 +771,7 @@ def test_workflow_compare_with_refinement_does_not_skip_retrieval() -> None:
             user_id='user-1',
         )
     )
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='compare those, but make them premium',
             session_id='session-compare-refine',
@@ -776,7 +843,7 @@ def test_workflow_third_turn_uses_latest_state_not_first_turn_state() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='Show me tops under $80.',
             session_id='session-latest-state',
@@ -784,7 +851,7 @@ def test_workflow_third_turn_uses_latest_state_not_first_turn_state() -> None:
             user_id='user-1',
         )
     )
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='Make those premium.',
             session_id='session-latest-state',
@@ -792,7 +859,7 @@ def test_workflow_third_turn_uses_latest_state_not_first_turn_state() -> None:
             user_id='user-1',
         )
     )
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='Also keep only in stock options.',
             session_id='session-latest-state',
@@ -848,7 +915,7 @@ def test_workflow_uses_query_planner_plan_when_valid() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    response = workflow.run(
+    response = _run_workflow_response(workflow, 
         _chat_payload(
             message='show in-stock tops for men under 80',
             session_id='session-planner-1',
@@ -882,7 +949,7 @@ def test_workflow_falls_back_to_deterministic_planning_when_query_planner_fails(
         model_name='gpt-4.1-mini',
     )
 
-    response = workflow.run(
+    response = _run_workflow_response(workflow, 
         _chat_payload(
             message='show in-stock tops under 50',
             session_id='session-planner-fallback',
@@ -944,7 +1011,7 @@ def test_workflow_planner_path_does_not_append_residual_semantic_text() -> None:
         model_name='gpt-4.1-mini',
     )
 
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='show tops for women for hot weather workouts',
             session_id='session-updater-carry',
@@ -952,7 +1019,7 @@ def test_workflow_planner_path_does_not_append_residual_semantic_text() -> None:
             user_id='user-1',
         )
     )
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='now make those for cold weather',
             session_id='session-updater-carry',
@@ -963,7 +1030,7 @@ def test_workflow_planner_path_does_not_append_residual_semantic_text() -> None:
 
     assert len(planner.calls) == 2
     assert planner.calls[1]['prior_semantic_query'] == 'hot weather tops'
-    assert tools.search_inputs[1].query == 'cold weather tops'
+    assert tools.search_inputs[1].semantic_query == 'cold weather tops'
 
 
 def test_workflow_planner_path_trusts_planner_availability_value_when_not_explicitly_changed() -> None:
@@ -1036,7 +1103,7 @@ def test_workflow_planner_path_trusts_planner_availability_value_when_not_explic
         model_name='gpt-4.1-mini',
     )
 
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='show in-stock tops for men under 80',
             session_id='session-availability-carry',
@@ -1044,7 +1111,7 @@ def test_workflow_planner_path_trusts_planner_availability_value_when_not_explic
             user_id='user-1',
         )
     )
-    workflow.run(
+    _run_workflow_response(workflow, 
         _chat_payload(
             message='under 35 dollars',
             session_id='session-availability-carry',
